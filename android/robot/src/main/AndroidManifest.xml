@@ -79,8 +79,6 @@
             </intent-filter>
         </activity>
 
-        <activity android:name=".compose.MyComposeView"/>
-
         <service
             android:name=".logging.SensorService"
             android:enabled="true"

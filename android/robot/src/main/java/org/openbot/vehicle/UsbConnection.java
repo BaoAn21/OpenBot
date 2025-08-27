@@ -14,7 +14,6 @@ import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
 import android.os.AsyncTask;
 import android.os.Build;
-import android.util.Log;
 import android.widget.Toast;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 import com.felhr.usbserial.UsbSerialDevice;
@@ -87,11 +86,7 @@ public class UsbConnection {
           if (ACTION_USB_PERMISSION.equals(action)) {
             synchronized (this) {
               UsbDevice usbDevice = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
-              // debug
-              Boolean granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false);
-              Timber.i(String.valueOf(granted));
-              //
-              if (granted) {
+              if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
                 if (usbDevice != null) {
                   // call method to set up device communication
                   startSerialConnection(usbDevice);

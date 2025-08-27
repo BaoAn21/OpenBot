@@ -69,7 +69,7 @@
 #define NO_PHONE_MODE 0
 
 // Enable/Disable debug print (1,0)
-#define DEBUG 1
+#define DEBUG 0
 
 // Enable/Disable coast mode (1,0)
 // When no control is applied, the robot will either coast (1) or actively stop (0)
@@ -118,7 +118,7 @@ const float VOLTAGE_MIN = 2.5f;
 const float VOLTAGE_LOW = 9.0f;
 const float VOLTAGE_MAX = 12.6f;
 const float ADC_FACTOR = 5.0 / 1023;
-#define HAS_INDICATORS 1
+#define HAS_INDICATORS 0
 #define HAS_SONAR 0
 #define SONAR_MEDIAN 0
 #define HAS_SPEED_SENSORS_FRONT 0

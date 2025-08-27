@@ -15,12 +15,8 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.View;
-import android.widget.Button;
-import android.widget.Toast;
-
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
-import androidx.compose.ui.platform.ComposeView;
 import androidx.lifecycle.ViewModelProvider;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 import androidx.navigation.NavController;
@@ -32,7 +28,6 @@ import com.google.android.material.bottomnavigation.BottomNavigationView;
 import java.util.Objects;
 import org.openbot.OpenBotApplication;
 import org.openbot.R;
-import org.openbot.compose.MyComposeView;
 import org.openbot.utils.Constants;
 import org.openbot.vehicle.UsbConnection;
 import org.openbot.vehicle.Vehicle;
@@ -54,11 +49,6 @@ public class MainActivity extends AppCompatActivity {
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     setContentView(R.layout.activity_main);
-    Button openCompose = findViewById(R.id.open_compose);
-    openCompose.setOnClickListener(v -> {
-      Intent intent = new Intent(MainActivity.this, MyComposeView.class);
-      startActivity(intent);
-    });
     viewModel = new ViewModelProvider(this).get(MainViewModel.class);
     vehicle = OpenBotApplication.vehicle;
     bottomNavigationView = findViewById(R.id.bottomNavigationView);
@@ -72,7 +62,6 @@ public class MainActivity extends AppCompatActivity {
     viewModel.setVehicle(vehicle);
     //    }
 
-    // USB DEBUG
     localBroadcastReceiver =
         new BroadcastReceiver() {
           @Override
@@ -102,8 +91,6 @@ public class MainActivity extends AppCompatActivity {
                         viewModel.setUsbStatus(vehicle.isUsbConnected());
                         Timber.i("USB device attached");
                       }
-                    } else {
-                      Toast.makeText(context,"Something wrong in USB", Toast.LENGTH_SHORT);
                     }
                   }
 
