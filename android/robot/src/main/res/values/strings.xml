@@ -206,5 +206,6 @@
     <string name="status_leds">Status LEDs</string>
     <string name="front_leds">Front LEDs</string>
     <string name="usb">USB</string>
+    <string name="usb_log">USB Log</string>
     <string name="cancel">Cancel</string>
 </resources>

@@ -12,4 +12,8 @@
         android:id="@+id/profileFragment"
         android:title="@string/profile"
         android:icon="@drawable/ic_profile"/>
+    <item
+        android:id="@+id/usbLogFragment"
+        android:title="@string/usb_log"
+        android:icon="@drawable/ic_code"/>
 </menu>

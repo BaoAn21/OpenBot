@@ -171,4 +171,9 @@
         android:id="@+id/robotInfoFragment"
         android:name="org.openbot.robot.RobotInfoFragment"
         android:label="RobotInfoFragment" />
+    <fragment
+        android:id="@+id/usbLogFragment"
+        android:name="org.openbot.main.UsbLogFragment"
+        android:label="UsbLogFragment"
+        tools:layout="@layout/fragment_usb_log" />
 </navigation>

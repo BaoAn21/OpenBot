@@ -140,7 +140,8 @@ public class MainActivity extends AppCompatActivity {
               || destination.getId() == R.id.settingsFragment
               || destination.getId() == R.id.usbFragment
               || destination.getId() == R.id.projectsFragment
-              || destination.getId() == R.id.profileFragment) {
+              || destination.getId() == R.id.profileFragment
+              || destination.getId() == R.id.usbLogFragment) {
             toolbar.setVisibility(View.VISIBLE);
             bottomNavigationView.setVisibility(View.VISIBLE);
           } else {
