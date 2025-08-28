@@ -6,6 +6,9 @@ import androidx.lifecycle.ViewModel;
 import org.openbot.model.SubCategory;
 import org.openbot.vehicle.Vehicle;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class MainViewModel extends ViewModel {
 
   private final MutableLiveData<SubCategory> selectedMode = new MutableLiveData<>();
@@ -18,14 +21,37 @@ public class MainViewModel extends ViewModel {
     return selectedMode;
   }
 
-  private final MutableLiveData<String> usbData = new MutableLiveData<>();
+  private final MutableLiveData<String> deviceData = new MutableLiveData<>();
+  private final MutableLiveData<List<String>> logMessages = new MutableLiveData<>(new ArrayList<>());
 
-  public void setDeviceData(String data) {
-    usbData.setValue(data);
+  public void processUsbData(String message) {
+    deviceData.setValue(message);
+
+    List<String> currentMessages = logMessages.getValue();
+    if (currentMessages != null) {
+      String timestamp = new java.text.SimpleDateFormat("[HH:mm:ss.SSS] ", java.util.Locale.getDefault()).format(new java.util.Date());
+      currentMessages.add(timestamp + message);
+      if (currentMessages.size() > 100) {
+        currentMessages.remove(0);
+      }
+      logMessages.setValue(currentMessages);
+    }
   }
 
   public LiveData<String> getDeviceData() {
-    return usbData;
+    return deviceData;
+  }
+
+  public LiveData<List<String>> getLogMessages() {
+    return logMessages;
+  }
+
+  public void clearLogs() {
+    List<String> currentMessages = logMessages.getValue();
+    if (currentMessages != null) {
+      currentMessages.clear();
+      logMessages.setValue(currentMessages);
+    }
   }
 
   private final MutableLiveData<Vehicle> vehicle = new MutableLiveData<>();

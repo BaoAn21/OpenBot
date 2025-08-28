@@ -101,7 +101,7 @@ public class MainActivity extends AppCompatActivity {
                   Timber.i("USB device detached");
                   break;
                 case DEVICE_ACTION_DATA_RECEIVED:
-                  viewModel.setDeviceData(intent.getStringExtra("data"));
+                  viewModel.processUsbData(intent.getStringExtra("data"));
                   break;
               }
             }
