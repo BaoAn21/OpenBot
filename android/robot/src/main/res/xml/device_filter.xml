@@ -29,4 +29,8 @@
 
     <!-- 0x0483 STM**** -->
     <usb-device vendor-id="1155" />
+
+    <!-- Espressif -->
+    <usb-device vendor-id="12346" product-id="16385" />
+
 </resources>

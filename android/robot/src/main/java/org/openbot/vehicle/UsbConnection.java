@@ -14,20 +14,21 @@ import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
 import android.os.AsyncTask;
 import android.os.Build;
+import android.os.RemoteException;
 import android.widget.Toast;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 import com.felhr.usbserial.UsbSerialDevice;
 import com.felhr.usbserial.UsbSerialInterface;
 import java.io.UnsupportedEncodingException;
 import java.util.Map;
-import org.openbot.env.Logger;
+import android.util.Log;
 import org.openbot.utils.Constants;
 import timber.log.Timber;
 
 public class UsbConnection {
+  private static final String TAG = "UsbConnection";
   private static final int USB_VENDOR_ID = 6790; // 0x2341; // 9025
   private static final int USB_PRODUCT_ID = 29987; // 0x0001;
-  private static final Logger LOGGER = new Logger();
 
   private final UsbManager usbManager;
   // private UsbDevice usbDevice;
@@ -75,7 +76,7 @@ public class UsbConnection {
             AsyncTask.execute(() -> onSerialDataReceived(dataStr));
           }
         } catch (UnsupportedEncodingException e) {
-          LOGGER.e("Error receiving USB data");
+          Log.e(TAG,"Error receiving USB data");
         }
       };
 
@@ -92,7 +93,7 @@ public class UsbConnection {
                   startSerialConnection(usbDevice);
                 }
               } else {
-                LOGGER.d("Permission denied for device " + usbDevice);
+                Log.d(TAG, "Permission denied for device " + usbDevice);
                 Toast.makeText(
                         UsbConnection.this.context,
                         "USB Host permission is required!",
@@ -101,7 +102,7 @@ public class UsbConnection {
               }
             }
           } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
-            LOGGER.i("USB device detached");
+            Log.i(TAG, "USB device detached");
             UsbDevice device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
             if (device != null) {
               stopUsbConnection();
@@ -122,23 +123,31 @@ public class UsbConnection {
       for (UsbDevice usbDevice : connectedDevices.values()) {
         // if (usbDevice.getVendorId() == USB_VENDOR_ID && usbDevice.getProductId() ==
         // USB_PRODUCT_ID) {
-        LOGGER.i("Device found: " + usbDevice.getDeviceName());
+        Log.i(TAG,"device " + usbDevice.getProductName() + " " +
+                usbDevice.getVendorId() + " " + usbDevice.getProductId() + " " + usbDevice.getManufacturerName());
+        Log.i(TAG, "Device found: " + usbDevice.getDeviceName());
         if (usbManager.hasPermission(usbDevice)) {
           return startSerialConnection(usbDevice);
         } else {
-          usbManager.requestPermission(usbDevice, usbPermissionIntent);
-          Toast.makeText(context, "Please allow USB Host connection.", Toast.LENGTH_SHORT).show();
-          return false;
+          try {
+            usbManager.requestPermission(usbDevice, usbPermissionIntent);
+            Log.i(TAG, "request permission");
+            Toast.makeText(context, "Please allow USB Host connection.", Toast.LENGTH_SHORT).show();
+            return false;
+          } catch (Exception e) {
+            Log.e(TAG, "USB_PERMISSION_ERROR");
+          }
+
         }
         // }
       }
     }
-    LOGGER.w("Could not start USB connection - No devices found");
+    Log.w(TAG, "Could not start USB connection - No devices found");
     return false;
   }
 
   private boolean startSerialConnection(UsbDevice device) {
-    LOGGER.i("Ready to open USB device connection");
+    Log.i(TAG, "Ready to open USB device connection");
     connection = usbManager.openDevice(device);
     serialDevice = UsbSerialDevice.createUsbSerialDevice(device, connection);
     boolean success = false;
@@ -155,20 +164,20 @@ public class UsbConnection {
         serialDevice.setParity(UsbSerialInterface.PARITY_NONE);
         serialDevice.setFlowControl(UsbSerialInterface.FLOW_CONTROL_OFF);
         serialDevice.read(callback);
-        LOGGER.i("Serial connection opened");
+        Log.i(TAG, "Serial connection opened");
         success = true;
       } else {
-        LOGGER.w("Cannot open serial connection");
+        Log.w(TAG, "Cannot open serial connection");
       }
     } else {
-      LOGGER.w("Could not create Usb Serial Device");
+      Log.w(TAG, "Could not create Usb Serial Device");
     }
     return success;
   }
 
   private void onSerialDataReceived(String data) {
     // Add whatever you want here
-    LOGGER.i("Serial data received from USB: " + data);
+    Log.i(TAG, "Serial data received from USB: " + data);
     localBroadcastManager.sendBroadcast(
         new Intent(Constants.DEVICE_ACTION_DATA_RECEIVED)
             .putExtra("from", "usb")
