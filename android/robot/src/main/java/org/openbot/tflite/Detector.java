@@ -69,6 +69,8 @@ public abstract class Detector extends Network {
         return new DetectorYoloV4(activity, model, device, numThreads);
       case YOLOV5:
         return new DetectorYoloV5(activity, model, device, numThreads);
+      case YOLOV10:
+        return new DetectorYoloV10(activity, model, device, numThreads);
       default:
         return null;
     }

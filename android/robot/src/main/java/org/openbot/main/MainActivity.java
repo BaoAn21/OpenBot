@@ -52,7 +52,7 @@ public class MainActivity extends AppCompatActivity {
     viewModel = new ViewModelProvider(this).get(MainViewModel.class);
     vehicle = OpenBotApplication.vehicle;
     bottomNavigationView = findViewById(R.id.bottomNavigationView);
-    bottomNavigationView.setSelectedItemId(R.id.home);
+    bottomNavigationView.setSelectedItemId(R.id.mainFragment);
     //    if (vehicle == null) {
     //      SharedPreferences sharedPreferences =
     // PreferenceManager.getDefaultSharedPreferences(this);

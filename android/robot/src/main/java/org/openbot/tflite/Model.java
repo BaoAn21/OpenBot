@@ -30,6 +30,7 @@ public class Model {
     EFFICIENTDET,
     YOLOV4,
     YOLOV5,
+    YOLOV10,
     NAVIGATION
   }
 

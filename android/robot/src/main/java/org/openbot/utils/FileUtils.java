@@ -79,6 +79,7 @@ public class FileUtils {
     Gson gson = new GsonBuilder().registerTypeAdapterFactory(new PostProcessingEnabler()).create();
     JsonElement jsonElement;
     Type listType = new TypeToken<List<Model>>() {}.getType();
+    // Note: remove this to not cache old config.json file
     boolean fileExists = checkFileExistence(activity, configFile);
     System.out.println("fileExist::::"+fileExists);
     if (fileExists) {
@@ -95,6 +96,7 @@ public class FileUtils {
         return null;
       }
     }
+    /// ////
     try {
       copyFile(
           activity.getAssets().open(configFile),

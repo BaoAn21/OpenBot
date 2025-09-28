@@ -124,5 +124,14 @@
     "pathType": "URL",
     "path": "https://storage.googleapis.com/openbot_models/efficientdet_lite2_metadata.tflite",
     "inputSize": "448x448"
+  },
+  {
+    "id": 15,
+    "class": "YOLOV10",
+    "type": "DETECTOR",
+    "name": "yolo10.tflite",
+    "pathType": "ASSET",
+    "path": "networks/yolo10.tflite",
+    "inputSize": "320x320"
   }
 ]
