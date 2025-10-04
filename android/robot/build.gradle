@@ -198,4 +198,9 @@ dependencies {
         exclude group: 'org.apache.httpcomponents'
         exclude module: 'guava-jdk5'
     }
+
+    // MQTT
+    implementation 'androidx.legacy:legacy-support-v4:1.0.0'
+    implementation 'com.github.hannesa2:paho.mqtt.android:3.3.5'
+    implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
 }

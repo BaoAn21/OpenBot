@@ -1,0 +1,33 @@
+# Use a modern version of the Docker Compose file format.
+version: '3.8'
+
+# Define all the services (containers) your application needs.
+services:
+  # This is the friendly name for our MQTT broker service.
+  mqtt:
+    # Use the official eclipse-mosquitto image from Docker Hub.
+    image: eclipse-mosquitto:2.0
+    
+    # Give the running container a specific, predictable name.
+    container_name: mosquitto-broker
+
+    # This makes the broker automatically restart if your computer reboots.
+    restart: unless-stopped
+
+    # Map ports from your computer (HOST) to the container (CONTAINER).
+    # Format is "HOST:CONTAINER"
+    ports:
+      - "1883:1883"  # Standard MQTT port
+      - "9001:9001"  # MQTT over WebSockets port
+
+    # Mount volumes to persist data and load configuration.
+    # Format is "./HOST_PATH:CONTAINER_PATH"
+    volumes:
+      # Mount our custom config file.
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      
+      # Create and mount a folder for persistent data (like retained messages).
+      - ./data:/mosquitto/data
+
+      # Create and mount a folder for log files.
+      - ./log:/mosquitto/log

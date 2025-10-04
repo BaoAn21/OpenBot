@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1. The ENTIRE layout is now wrapped in a ScrollView -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    tools:context=".mqtt.MqttLogFragment">
+
+    <!-- 2. The LinearLayout is now the single child of the ScrollView -->
+    <!-- Its height is now "wrap_content" so it can grow as needed. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- Connection Section (No Changes) -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="MQTT Broker Configuration"
+            android:textAppearance="@style/TextAppearance.AppCompat.Title" />
+
+        <EditText
+            android:id="@+id/broker_url_edittext"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="e.g., tcp://192.168.1.10:1883"
+            android:inputType="textUri" />
+
+        <Button
+            android:id="@+id/connect_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Connect" />
+
+        <!-- Publish Section (No Changes) -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="16dp"
+            android:background="?android:attr/listDivider" />
+
+        <EditText
+            android:id="@+id/topic_edittext"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:hint="Topic (e.g., openbot/data)"
+            android:inputType="text" />
+
+        <EditText
+            android:id="@+id/message_edittext"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="Message payload"
+            android:inputType="text" />
+
+        <Button
+            android:id="@+id/send_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Send Message" />
+
+        <!-- Log View Section -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Live Logs:"
+            android:textAppearance="@style/TextAppearance.AppCompat.Subhead" />
+
+        <!-- 3. The INNER ScrollView has been REMOVED. It is not needed. -->
+        <!-- The TextView for logs is now a direct child of the LinearLayout. -->
+        <TextView
+            android:id="@+id/mqtt_log_textview"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="200dp"
+            android:layout_marginTop="8dp"
+            android:padding="8dp"
+            android:background="#1C1C1C"
+            android:fontFamily="monospace"
+            android:textColor="#AEAEAE"
+            android:textAppearance="@style/TextAppearance.AppCompat.Body1" />
+
+    </LinearLayout>
+
+</ScrollView>

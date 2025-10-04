@@ -10,6 +10,7 @@ import androidx.preference.PreferenceManager;
 import org.jetbrains.annotations.NotNull;
 //import org.openbot.entity.MyObjectBox;
 //import org.openbot.objectbox.ObjectBox;
+import org.openbot.mqtt.MqttService;
 import org.openbot.objectbox.ObjectBox;
 import org.openbot.objectbox.entity.LogEntry;
 import org.openbot.vehicle.Vehicle;
@@ -24,6 +25,9 @@ public class OpenBotApplication extends Application {
   static Context context;
   public static Vehicle vehicle;
 
+  public static MqttService mqttService;
+
+
   public static Context getContext() {
     return context;
   }
@@ -32,7 +36,6 @@ public class OpenBotApplication extends Application {
   public void onCreate() {
     super.onCreate();
     context = getApplicationContext();
-    Log.d(TAG,"hdsakfjhasdjfkhasdkjfahs");
     ObjectBox.init(this);
     BoxStore store = ObjectBox.get();
 //     --- ADD THIS TEST CODE ---

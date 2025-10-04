@@ -101,6 +101,9 @@ public class MainFragment extends Fragment implements OnItemClickListener<SubCat
         Intent intent = new Intent(requireActivity(), DefaultActivity.class);
         startActivity(intent);
         break;
+      case FeatureList.MQTT_LOG:
+        Navigation.findNavController(requireView()).navigate(R.id.action_mainFragment_to_mqttLogFragment);
+        break;
     }
   }
 }

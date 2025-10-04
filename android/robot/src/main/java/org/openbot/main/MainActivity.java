@@ -9,6 +9,7 @@ import android.content.IntentFilter;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.Menu;
@@ -28,6 +29,7 @@ import com.google.android.material.bottomnavigation.BottomNavigationView;
 import java.util.Objects;
 import org.openbot.OpenBotApplication;
 import org.openbot.R;
+import org.openbot.mqtt.MqttService;
 import org.openbot.utils.Constants;
 import org.openbot.vehicle.UsbConnection;
 import org.openbot.vehicle.Vehicle;
@@ -44,11 +46,19 @@ public class MainActivity extends AppCompatActivity {
   private LocalBroadcastManager localBroadcastManager;
   private BottomNavigationView bottomNavigationView;
   private NavController navController;
+  private MqttService mqttService;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     setContentView(R.layout.activity_main);
+
+    // TODO: Make the broker URL and client ID configurable
+//    String brokerUrl = "tcp://172.28.182.95:1883";
+//    String clientId = "OpenBot_" + System.currentTimeMillis();
+//    mqttService = new MqttService(this, brokerUrl, clientId);
+//    mqttService.connect();
+
     viewModel = new ViewModelProvider(this).get(MainViewModel.class);
     vehicle = OpenBotApplication.vehicle;
     bottomNavigationView = findViewById(R.id.bottomNavigationView);

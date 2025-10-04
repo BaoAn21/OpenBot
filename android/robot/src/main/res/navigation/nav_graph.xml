@@ -40,6 +40,9 @@
         <action
             android:id="@+id/action_mainFragment_to_robotInfoFragment"
             app:destination="@id/robotInfoFragment" />
+        <action
+            android:id="@+id/action_mainFragment_to_mqttLogFragment"
+            app:destination="@id/mqttLogFragment" />
     </fragment>
     <fragment
         android:id="@+id/freeRoamFragment"
@@ -176,4 +179,9 @@
         android:name="org.openbot.main.UsbLogFragment"
         android:label="UsbLogFragment"
         tools:layout="@layout/fragment_usb_log" />
+    <fragment
+        android:id="@+id/mqttLogFragment"
+        android:name="org.openbot.mqtt.MqttLogFragment"
+        android:label="MqttLogFragment"
+        tools:layout="@layout/fragment_mqtt_log" />
 </navigation>

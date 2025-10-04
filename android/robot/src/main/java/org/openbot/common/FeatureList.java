@@ -18,6 +18,7 @@ public class FeatureList {
   public static final String CONTROLLER = "Controller";
   public static final String CONTROLLER_MAPPING = "Controller Mapping";
   public static final String ROBOT_INFO = "Robot Info";
+  public static final String MQTT_LOG = "MQTT Log";
 
   // Game
   public static final String GAME = "Game";
@@ -89,6 +90,7 @@ public class FeatureList {
 
     subCategories = new ArrayList<>();
     subCategories.add(new SubCategory(DEFAULT, R.drawable.ic_legacy_car, "#F86363"));
+    subCategories.add(new SubCategory(MQTT_LOG, R.drawable.ic_baseline_message_24, "#00BCD4"));
     categories.add(new Category(LEGACY, subCategories));
 
     /*
