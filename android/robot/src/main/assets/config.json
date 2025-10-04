@@ -132,6 +132,6 @@
     "name": "yolo10.tflite",
     "pathType": "ASSET",
     "path": "networks/yolo10.tflite",
-    "inputSize": "320x320"
+    "inputSize": "640x640"
   }
 ]
