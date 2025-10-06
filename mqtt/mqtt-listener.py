@@ -1,9 +1,8 @@
 import paho.mqtt.client as mqtt
 import time
 
-# IMPORTANT: Use the same IP address as your Android app
-BROKER_ADDRESS = "172.28.182.95" # e.g., "192.168.1.15"
-TOPIC = "openbot/data"
+BROKER_ADDRESS = "192.168.4.1"
+TOPIC = "VR_control"
 
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
