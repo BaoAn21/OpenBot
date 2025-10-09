@@ -74,6 +74,11 @@ public class MultiBoxTracker {
   private float leftControl;
   private float rightControl;
   private boolean useDynamicSpeed = false;
+  private boolean isSearching = false;
+  private long searchStartTime = 0;
+  private static final long SEARCH_DURATION_MS = 5000; // 5 seconds for a full circle, can be adjusted.
+  private float lastTrackedObjectX = 0.0f;
+  private boolean searchDirectionIsLeft = false;
 
   public MultiBoxTracker(final Context context) {
     for (final int color : COLORS) {
@@ -153,6 +158,7 @@ public class MultiBoxTracker {
    */
   public synchronized Control updateTarget() {
     if (!trackedObjects.isEmpty()) {
+      isSearching = false;
       // Pick detection with highest probability
       final RectF trackedPos = new RectF(trackedObjects.get(0).location);
       final boolean rotated = sensorOrientation % 180 == 90;
@@ -160,6 +166,7 @@ public class MultiBoxTracker {
       // calculate track box area for distance estimate
       float boxArea = trackedPos.height() * trackedPos.width();
       float centerX = (rotated ? trackedPos.centerY() : trackedPos.centerX());
+      lastTrackedObjectX = centerX;
       // Make sure object center is in frame
       centerX = Math.max(0.0f, Math.min(centerX, imgWidth));
       // Scale relative position along x-axis between -1 and 1
@@ -192,8 +199,27 @@ public class MultiBoxTracker {
       }
 
     } else {
-      leftControl = 0.0f;
-      rightControl = 0.0f;
+      if (!isSearching) {
+        isSearching = true;
+        searchStartTime = System.currentTimeMillis();
+        final boolean rotated = sensorOrientation % 180 == 90;
+        float imgWidth = (float) (rotated ? frameHeight : frameWidth);
+        searchDirectionIsLeft = lastTrackedObjectX < imgWidth / 2;
+      }
+
+      if (System.currentTimeMillis() - searchStartTime > SEARCH_DURATION_MS) {
+        isSearching = false;
+        leftControl = 0.0f;
+        rightControl = 0.0f;
+      } else {
+        if (searchDirectionIsLeft) {
+          leftControl = -0.5f;
+          rightControl = 0.5f;
+        } else {
+          leftControl = 0.5f;
+          rightControl = -0.5f;
+        }
+      }
     }
 
     return new Control(
