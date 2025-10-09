@@ -91,8 +91,11 @@ public class MqttLogFragment extends Fragment {
 
         String brokerUrl = "tcp://" + brokerUrlEditText.getText().toString().trim() + ":1883";
         String clientId = "OpenBot_" + System.currentTimeMillis();
+        String topic = topicEditText.getText().toString().trim();
 
-        OpenBotApplication.mqttService = new MqttService(requireContext(), brokerUrl, clientId);
+        OpenBotApplication.vehicle.setMqttControlTopic(topic);
+
+        OpenBotApplication.mqttService = new MqttService(requireContext(), brokerUrl, clientId,topic);
         OpenBotApplication.mqttService.connect();
     }
 

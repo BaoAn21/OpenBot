@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Timer;
 import java.util.TimerTask;
+
+import org.openbot.OpenBotApplication;
 import org.openbot.env.GameController;
 import org.openbot.env.SensorReading;
 import org.openbot.main.CommonRecyclerViewAdapter;
@@ -16,6 +18,10 @@ import org.openbot.main.ScanDeviceAdapter;
 import org.openbot.utils.Enums;
 
 public class Vehicle {
+
+  // MQTT
+  private String mqttControlTopic = "robot/control"; // A default topic
+  private String lastMqttCommand = "";
 
   private final Noise noise = new Noise(1000, 2000, 5000);
   private boolean noiseEnabled = false;
@@ -412,6 +418,44 @@ public class Vehicle {
     sendStringToDevice(String.format(Locale.US, "l%d,%d\n", front, back));
   }
 
+  // MQTT
+  public void setMqttControlTopic(String topic) {
+    this.mqttControlTopic = topic;
+  }
+  private void sendMqttControl() {
+    // Check if the global MqttService is initialized and connected
+    if (OpenBotApplication.mqttService == null || !OpenBotApplication.mqttService.isConnected()) {
+      return;
+    }
+
+    String cmd = "";
+    float left = control.getLeft();
+    float right = control.getRight();
+    final float THRESHOLD = 0.1f;
+
+    if (Math.abs(left) < THRESHOLD && Math.abs(right) < THRESHOLD) {
+      cmd = "Stop";
+    } else if (left > THRESHOLD && right > THRESHOLD) {
+      cmd = "Forward";
+    } else if (left < -THRESHOLD && right < -THRESHOLD) {
+      cmd = "Backward";
+    } else if (left > THRESHOLD && right < -THRESHOLD) {
+      cmd = "Right";
+    } else if (left < -THRESHOLD && right > THRESHOLD) {
+      cmd = "Left";
+    } else if (left > THRESHOLD && Math.abs(right) < THRESHOLD) {
+      cmd = "RotateRight";
+    } else if (Math.abs(left) < THRESHOLD && right > THRESHOLD) {
+      cmd = "RotateLeft";
+    }
+
+    // Only publish if the command has changed to prevent flooding the broker
+    if (!cmd.isEmpty() && !cmd.equals(lastMqttCommand)) {
+      OpenBotApplication.mqttService.publish(mqttControlTopic, cmd);
+      lastMqttCommand = cmd;
+    }
+  }
+
   public void sendControl() {
 
     int left = (int) (getLeftSpeed());
@@ -427,6 +471,7 @@ public class Vehicle {
       right = (int) ((control.getRight() - noise.getValue()) * speedMultiplier);
 
     sendStringToDevice(String.format(Locale.US, "c%d,%d\n", left, right));
+    sendMqttControl();
   }
 
   protected void sendHeartbeat(int timeout_ms) {

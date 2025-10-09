@@ -22,11 +22,12 @@ public class MqttService {
     private static final String TAG = "MqttService";
     private MqttAndroidClient client;
     private LocalBroadcastManager broadcaster;
+    private volatile boolean isConnected = false;
 
     public static final String MQTT_LOG_EVENT = "mqtt-log-event";
     public static final String MQTT_LOG_MESSAGE = "mqtt-log-message";
 
-    public MqttService(Context context, String brokerUrl, String clientId) {
+    public MqttService(Context context, String brokerUrl, String clientId, String topic) {
         client = new MqttAndroidClient(context, brokerUrl, clientId, Ack.AUTO_ACK);
         broadcaster = LocalBroadcastManager.getInstance(context);
 
@@ -34,15 +35,17 @@ public class MqttService {
             @Override
             public void connectComplete(boolean reconnect, String serverURI) {
                 String message = "Connection to broker complete.";
+                isConnected = true;
                 Log.d(TAG, message);
                 sendUpdate(message);
                 // After connecting, we can now subscribe automatically
-                subscribe("openbot/data");
+                subscribe(topic);
             }
 
             @Override
             public void connectionLost(Throwable cause) {
                 String message = "Connection was lost.";
+                isConnected = false;
                 Log.d(TAG, message);
                 sendUpdate(message);
             }
@@ -75,14 +78,16 @@ public class MqttService {
 
             @Override
             public void onFailure(IMqttToken asyncActionToken, Throwable exception) {
-                // This logging is still perfect for debugging
+                isConnected = false;
                 Log.e(TAG, "Connection Failure!", exception);
             }
         });
     }
 
     public void disconnect() {
+
         client.disconnect();
+        isConnected = false;
     }
 
     public void publish(String topic, String payload) {
@@ -123,5 +128,9 @@ public class MqttService {
         Intent intent = new Intent(MQTT_LOG_EVENT);
         intent.putExtra(MQTT_LOG_MESSAGE, message);
         broadcaster.sendBroadcast(intent);
+    }
+
+    public boolean isConnected() {
+        return isConnected;
     }
 }

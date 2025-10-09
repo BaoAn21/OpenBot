@@ -30,6 +30,14 @@
             android:hint="e.g., tcp://192.168.1.10:1883"
             android:inputType="textUri" />
 
+        <EditText
+            android:id="@+id/topic_edittext"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:hint="Topic (e.g., openbot/data)"
+            android:inputType="text" />
+
         <Button
             android:id="@+id/connect_button"
             android:layout_width="match_parent"
@@ -44,13 +52,6 @@
             android:layout_marginTop="16dp"
             android:background="?android:attr/listDivider" />
 
-        <EditText
-            android:id="@+id/topic_edittext"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:hint="Topic (e.g., openbot/data)"
-            android:inputType="text" />
 
         <EditText
             android:id="@+id/message_edittext"
