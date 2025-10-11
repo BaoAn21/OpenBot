@@ -27,6 +27,7 @@ import android.graphics.Paint.Join;
 import android.graphics.Paint.Style;
 import android.graphics.RectF;
 import android.text.TextUtils;
+import android.util.Log;
 import android.util.Pair;
 import android.util.TypedValue;
 import java.util.LinkedList;
@@ -41,6 +42,7 @@ import org.openbot.vehicle.Control;
 
 /** A tracker that handles non-max suppression and matches existing objects to new detections. */
 public class MultiBoxTracker {
+  private static final String TAG = "MultiBoxTracker";
   private static final float TEXT_SIZE_DIP = 18;
   private static final float MIN_SIZE = 16.0f;
   private static final int[] COLORS = {
@@ -165,6 +167,7 @@ public class MultiBoxTracker {
       float imgWidth = (float) (rotated ? frameHeight : frameWidth);
       // calculate track box area for distance estimate
       float boxArea = trackedPos.height() * trackedPos.width();
+//      Log.d(TAG, "boxArea: " + boxArea);
       float centerX = (rotated ? trackedPos.centerY() : trackedPos.centerX());
       lastTrackedObjectX = centerX;
       // Make sure object center is in frame

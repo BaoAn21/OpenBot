@@ -422,6 +422,7 @@ public class Vehicle {
   public void setMqttControlTopic(String topic) {
     this.mqttControlTopic = topic;
   }
+
   private void sendMqttControl() {
     // Check if the global MqttService is initialized and connected
     if (OpenBotApplication.mqttService == null || !OpenBotApplication.mqttService.isConnected()) {
@@ -440,20 +441,24 @@ public class Vehicle {
     } else if (left < -THRESHOLD && right < -THRESHOLD) {
       cmd = "Backward";
     } else if (left > THRESHOLD && right < -THRESHOLD) {
-      cmd = "Right";
-    } else if (left < -THRESHOLD && right > THRESHOLD) {
-      cmd = "Left";
-    } else if (left > THRESHOLD && Math.abs(right) < THRESHOLD) {
       cmd = "RotateRight";
-    } else if (Math.abs(left) < THRESHOLD && right > THRESHOLD) {
+    } else if (right > THRESHOLD && left < -THRESHOLD) {
       cmd = "RotateLeft";
     }
 
-    // Only publish if the command has changed to prevent flooding the broker
-    if (!cmd.isEmpty() && !cmd.equals(lastMqttCommand)) {
-      OpenBotApplication.mqttService.publish(mqttControlTopic, cmd);
-      lastMqttCommand = cmd;
+    String commandToSend;
+
+    if( !lastMqttCommand.isEmpty() && !lastMqttCommand.equals("Stop")) {
+      commandToSend = "Stop";
+    } else {
+      commandToSend = cmd;
     }
+
+    if (!commandToSend.isEmpty()) {
+      OpenBotApplication.mqttService.publish(mqttControlTopic, commandToSend);
+      lastMqttCommand = commandToSend;
+    }
+
   }
 
   public void sendControl() {
