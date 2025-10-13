@@ -54,7 +54,7 @@ public class MqttService {
             public void messageArrived(String topic, MqttMessage message) throws Exception {
                 String payload = new String(message.getPayload(), StandardCharsets.UTF_8);
                 String logMessage = "📩 MESSAGE RECEIVED on topic '" + topic + "': " + payload;
-                Log.d(TAG, logMessage);
+//                Log.d(TAG, logMessage);
                 sendUpdate(logMessage);
             }
 

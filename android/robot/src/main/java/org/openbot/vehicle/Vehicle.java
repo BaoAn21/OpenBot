@@ -446,19 +446,23 @@ public class Vehicle {
       cmd = "RotateLeft";
     }
 
-    String commandToSend;
-
-    if( !lastMqttCommand.isEmpty() && !lastMqttCommand.equals("Stop")) {
-      commandToSend = "Stop";
-    } else {
-      commandToSend = cmd;
+    // If the calculated command is the same as the last one, do nothing.
+    if (cmd.equals(lastMqttCommand)) {
+      return;
     }
 
-    if (!commandToSend.isEmpty()) {
-      OpenBotApplication.mqttService.publish(mqttControlTopic, commandToSend);
-      lastMqttCommand = commandToSend;
+    // If the last command was a movement command (not Stop), send "Stop" first.
+    if (!lastMqttCommand.isEmpty() && !lastMqttCommand.equals("Stop")) {
+      OpenBotApplication.mqttService.publish(mqttControlTopic, "Stop");
     }
 
+    // Send the new command.
+    if (!cmd.isEmpty()) {
+      OpenBotApplication.mqttService.publish(mqttControlTopic, cmd);
+    }
+
+    // Update the last command with the new one we just sent.
+    lastMqttCommand = cmd;
   }
 
   public void sendControl() {
