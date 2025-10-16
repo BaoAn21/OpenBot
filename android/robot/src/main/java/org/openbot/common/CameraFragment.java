@@ -194,4 +194,10 @@ public abstract class CameraFragment extends ControlsFragment {
   }
 
   protected abstract void processFrame(Bitmap image, ImageProxy imageProxy);
+
+  protected void setPreviewVisibility(int visibility) {
+    if (previewView != null) {
+      previewView.setVisibility(visibility);
+    }
+  }
 }

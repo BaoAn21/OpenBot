@@ -3,15 +3,24 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <androidx.camera.view.PreviewView
-        android:id="@+id/camera_preview"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent" />
-
     <ImageView
         android:id="@+id/depth_map_view"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_width="160dp"
+        android:layout_height="160dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="16dp"
+        android:layout_marginEnd="16dp"
+        android:background="#80000000"
         android:scaleType="fitCenter" />
+
+    <ImageView
+        android:id="@+id/camera_toggle_button"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="16dp"
+        android:background="@drawable/button_item_background_black"
+        android:padding="8dp"
+        android:src="@drawable/ic_cameraswitch" />
 
 </FrameLayout>
