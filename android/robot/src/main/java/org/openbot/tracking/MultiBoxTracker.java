@@ -192,7 +192,9 @@ public class MultiBoxTracker {
         float scaleFactor = 1.0f - boxArea / (frameWidth * frameHeight);
         scaleFactor = scaleFactor > 0.75f ? 1.0f : scaleFactor; // tracked object far, full speed
         // apply scale factor if tracked object is not too near, otherwise stop
-        if (scaleFactor > 0.25f) {
+
+        Log.d(TAG, String.valueOf(scaleFactor));
+        if (scaleFactor > 0.6f) {
           leftControl *= scaleFactor;
           rightControl *= scaleFactor;
         } else {

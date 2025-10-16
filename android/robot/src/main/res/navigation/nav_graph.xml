@@ -43,6 +43,9 @@
         <action
             android:id="@+id/action_mainFragment_to_mqttLogFragment"
             app:destination="@id/mqttLogFragment" />
+        <action
+            android:id="@+id/action_mainFragment_to_depthDetectionFragment"
+            app:destination="@id/depthDetectionFragment" />
     </fragment>
     <fragment
         android:id="@+id/freeRoamFragment"
@@ -184,4 +187,9 @@
         android:name="org.openbot.mqtt.MqttLogFragment"
         android:label="MqttLogFragment"
         tools:layout="@layout/fragment_mqtt_log" />
+    <fragment
+        android:id="@+id/depthDetectionFragment"
+        android:name="org.openbot.depthDetection.DepthDetectionFragment"
+        android:label="fragment_depth_detection"
+        tools:layout="@layout/fragment_depth_detection" />
 </navigation>

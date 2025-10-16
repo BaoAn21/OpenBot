@@ -25,7 +25,8 @@ android {
     buildToolsVersion '33.0.1'
     defaultConfig {
         applicationId "org.openbot"
-        minSdkVersion 21
+//        minSdkVersion 21
+        minSdkVersion 24
         targetSdkVersion 32
         ndk {
             abiFilters 'armeabi-v7a', 'arm64-v8a'
@@ -84,6 +85,7 @@ dependencies {
     // Build off of stable TensorFlow Lite
     implementation 'org.tensorflow:tensorflow-lite:2.4.0'
     implementation 'org.tensorflow:tensorflow-lite-gpu:2.4.0'
+    implementation 'org.tensorflow:tensorflow-lite-support:0.4.4'
 
     implementation "com.google.android.gms:play-services-location:$location_version"
     implementation "com.google.android.gms:play-services-nearby:$nearby_version"
@@ -203,4 +205,7 @@ dependencies {
     implementation 'androidx.legacy:legacy-support-v4:1.0.0'
     implementation 'com.github.hannesa2:paho.mqtt.android:3.3.5'
     implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
+
+    // Mediapipe
+    implementation 'com.google.mediapipe:tasks-vision:0.10.29'
 }

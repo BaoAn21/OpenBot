@@ -82,6 +82,11 @@ public class MainFragment extends Fragment implements OnItemClickListener<SubCat
             .navigate(R.id.action_mainFragment_to_autopilotFragment);
         break;
 
+      case FeatureList.DEPTH_DETECTION:
+        Navigation.findNavController(requireView())
+            .navigate(R.id.action_mainFragment_to_depthDetectionFragment);
+        break;
+
       case FeatureList.OBJECT_NAV:
         Navigation.findNavController(requireView())
             .navigate(R.id.action_mainFragment_to_objectNavFragment);

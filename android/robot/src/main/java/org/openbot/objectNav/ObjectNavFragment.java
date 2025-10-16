@@ -1,5 +1,9 @@
 package org.openbot.objectNav;
 
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -11,6 +15,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.SystemClock;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -22,8 +27,11 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageProxy;
+import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 import androidx.navigation.Navigation;
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
+import com.google.mediapipe.examples.gesturerecognizer.GestureRecognizerHelper;
+
 import java.io.IOException;
 import java.util.LinkedList;
 import java.util.List;
@@ -34,6 +42,7 @@ import org.openbot.common.CameraFragment;
 import org.openbot.databinding.FragmentObjectNavBinding;
 import org.openbot.env.BorderedText;
 import org.openbot.env.ImageUtils;
+import org.openbot.mqtt.MqttService;
 import org.openbot.tflite.Detector;
 import org.openbot.tflite.Model;
 import org.openbot.tflite.Network;
@@ -50,6 +59,13 @@ public class ObjectNavFragment extends CameraFragment {
   private FragmentObjectNavBinding binding;
   private Handler handler;
   private HandlerThread handlerThread;
+
+  private static String TAG = "ObjectNavFragment";
+
+  private BroadcastReceiver mqttReceiver;
+
+  private GestureRecognizerHelper gestureRecognizerHelper;
+
 
   private boolean computingNetwork = false;
   public static float MINIMUM_CONFIDENCE_TF_OD_API = 0.5f;
@@ -234,6 +250,20 @@ public class ObjectNavFragment extends CameraFragment {
           preferencesManager.setDynamicSpeed(binding.dynamicSpeed.isChecked());
           tracker.setDynamicSpeed(preferencesManager.getDynamicSpeed());
         });
+
+    mqttReceiver = new BroadcastReceiver() {
+      @Override
+      public void onReceive(Context context, Intent intent) {
+        String message = intent.getStringExtra(MqttService.MQTT_LOG_MESSAGE);
+
+        // ADD THIS NULL CHECK
+        if (binding != null && message != null) {
+          // This code will now only run if the view is active
+          binding.mqttMessageTextview.setText(message);
+        }
+      }
+    };
+
   }
 
   private void mirrorControl() {
@@ -356,6 +386,8 @@ public class ObjectNavFragment extends CameraFragment {
 
   @Override
   public synchronized void onResume() {
+    LocalBroadcastManager.getInstance(requireContext())
+            .registerReceiver(mqttReceiver, new IntentFilter(MqttService.MQTT_LOG_EVENT));
     croppedBitmap = null;
     tracker = null;
     handlerThread = new HandlerThread("inference");
@@ -367,6 +399,7 @@ public class ObjectNavFragment extends CameraFragment {
 
   @Override
   public synchronized void onPause() {
+    LocalBroadcastManager.getInstance(requireContext()).unregisterReceiver(mqttReceiver);
     handlerThread.quitSafely();
     try {
       handlerThread.join();
