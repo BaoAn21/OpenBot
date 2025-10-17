@@ -2,8 +2,10 @@
 
 package org.openbot.depthDetection;
 
+import android.app.Activity;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.view.Surface;
 
 public class ImageUtils {
     public static Bitmap toGrayscaleBitmap(float[] floatArray, int imageDim) {
@@ -26,6 +28,20 @@ public class ImageUtils {
         }
         bitmap.setPixels(pixels, 0, imageDim, 0, 0, imageDim, imageDim);
         return bitmap;
+    }
+
+    @SuppressWarnings("deprecation")
+    public static int getScreenOrientation(Activity activity) {
+        switch (activity.getWindowManager().getDefaultDisplay().getRotation()) {
+            case Surface.ROTATION_270:
+                return 270;
+            case Surface.ROTATION_180:
+                return 180;
+            case Surface.ROTATION_90:
+                return 90;
+            default:
+                return 0;
+        }
     }
 
     private static int r(int v) { return v > 127 ? (v < 192 ? (v - 127) * 4 : 255) : 0; }

@@ -1,6 +1,7 @@
 package org.openbot.depthDetection;
 
 import android.graphics.Bitmap;
+import android.graphics.Matrix;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -27,6 +28,9 @@ public class DepthDetectionFragment extends CameraFragment {
     // Declare the binding object
     private FragmentDepthDetectionBinding binding;
 
+    private Bitmap rotatedBitmap;
+    private int sensorOrientation;
+
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
         // *** THE CORRECT PATTERN FROM ObjectNavFragment ***
@@ -42,6 +46,8 @@ public class DepthDetectionFragment extends CameraFragment {
         super.onViewCreated(view, savedInstanceState);
 
         ImageView cameraToggleButton = binding.cameraToggleButton;
+
+        sensorOrientation = 90 - ImageUtils.getScreenOrientation(requireActivity());
 
         // Set a click listener
         cameraToggleButton.setOnClickListener(v -> {
@@ -62,18 +68,36 @@ public class DepthDetectionFragment extends CameraFragment {
 
     @Override
     protected void processFrame(Bitmap image, ImageProxy imageProxy) {
-        // This log message should now appear
-        Log.d(TAG, "processFrame is receiving data!");
+        if (midasNet == null || image == null) {
+            return;
+        }
 
-        if (midasNet != null && image != null) {
-            Bitmap depthMap = midasNet.getDepthMap(image);
-            if (getActivity() != null) {
-                getActivity().runOnUiThread(() -> {
-                    if (depthMapView != null) {
-                        depthMapView.setImageBitmap(depthMap);
-                    }
-                });
-            }
+        // 1. Get the original depth map from the model. It will be incorrectly rotated.
+        Bitmap originalDepthMap = midasNet.getDepthMap(image);
+
+        // 2. Create a transformation matrix to fix the rotation.
+        // A 90-degree clockwise rotation is needed to make it upright.
+        Matrix matrix = new Matrix();
+        matrix.postRotate(90f);
+
+        // 3. Create a new, correctly oriented bitmap from the original depth map.
+        Bitmap rotatedDepthMap = Bitmap.createBitmap(
+                originalDepthMap,
+                0,                                // Start at x=0
+                0,                                // Start at y=0
+                originalDepthMap.getWidth(),      // Use the full width
+                originalDepthMap.getHeight(),     // Use the full height
+                matrix,
+                true
+        );
+
+        // 4. Display the final, corrected bitmap on the screen.
+        if (getActivity() != null) {
+            getActivity().runOnUiThread(() -> {
+                if (depthMapView != null) {
+                    depthMapView.setImageBitmap(rotatedDepthMap);
+                }
+            });
         }
     }
 
