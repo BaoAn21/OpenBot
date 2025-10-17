@@ -109,7 +109,103 @@
 //        }
 //    }
 //}
-
+//
+//package org.openbot.depthDetection;
+//
+//import android.content.Context;
+//import android.graphics.Bitmap;
+//import org.tensorflow.lite.DataType;
+//import org.tensorflow.lite.Interpreter;
+//import org.tensorflow.lite.gpu.CompatibilityList;
+//import org.tensorflow.lite.gpu.GpuDelegate;
+//import org.tensorflow.lite.support.common.FileUtil;
+//import org.tensorflow.lite.support.image.ImageProcessor;
+//import org.tensorflow.lite.support.image.TensorImage;
+//import org.tensorflow.lite.support.image.ops.ResizeOp;
+//import org.tensorflow.lite.support.tensorbuffer.TensorBuffer;
+//import java.io.IOException;
+//import java.nio.ByteBuffer;
+//
+//public class MidasNetSmall {
+//    // CHANGE 1: Point to your new quantized model file
+//    private static final String MODEL_NAME = "Midas-V2_w8a8.tflite"; // Or your exact filename
+//    private static final int INPUT_IMAGE_DIM = 256;
+//    private static final int NUM_THREADS = 4;
+//
+//    private Interpreter interpreter;
+//    private final ImageProcessor inputTensorProcessor;
+//    private MapType mapType;
+//
+//    public float[] getDepthMapFloatArray(Bitmap inputImage) {
+//        TensorImage inputTensor = TensorImage.fromBitmap(inputImage);
+//        inputTensor = inputTensorProcessor.process(inputTensor);
+//
+//        TensorBuffer outputTensor = TensorBuffer.createFixedSize(
+//                new int[]{1, INPUT_IMAGE_DIM, INPUT_IMAGE_DIM, 1},
+//                DataType.UINT8
+//        );
+//
+//        interpreter.run(inputTensor.getBuffer(), outputTensor.getBuffer());
+//
+//        ByteBuffer outputBuffer = outputTensor.getBuffer();
+//        outputBuffer.rewind();
+//        float[] floatArray = new float[outputBuffer.remaining()];
+//        for (int i = 0; i < floatArray.length; i++) {
+//            floatArray[i] = (float) (outputBuffer.get() & 0xFF);
+//        }
+//        return floatArray;
+//    }
+//
+//    public MidasNetSmall(Context context, MapType mapType) throws IOException {
+//        this.mapType = mapType;
+//
+//        inputTensorProcessor = new ImageProcessor.Builder()
+//                .add(new ResizeOp(INPUT_IMAGE_DIM, INPUT_IMAGE_DIM, ResizeOp.ResizeMethod.BILINEAR))
+//                .build();
+//
+//        Interpreter.Options options = new Interpreter.Options();
+//        CompatibilityList compatList = new CompatibilityList();
+//        if (compatList.isDelegateSupportedOnThisDevice()) {
+//            options.addDelegate(new GpuDelegate(compatList.getBestOptionsForThisDevice()));
+//        } else {
+//            options.setNumThreads(NUM_THREADS);
+//        }
+//
+//        interpreter = new Interpreter(FileUtil.loadMappedFile(context, MODEL_NAME), options);
+//    }
+//
+//    public Bitmap getDepthMap(Bitmap inputImage) {
+//        TensorImage inputTensor = TensorImage.fromBitmap(inputImage);
+//        inputTensor = inputTensorProcessor.process(inputTensor);
+//
+//        TensorBuffer outputTensor = TensorBuffer.createFixedSize(
+//                new int[]{1, INPUT_IMAGE_DIM, INPUT_IMAGE_DIM, 1}, // Batch size of 1
+//                DataType.UINT8
+//        );
+//
+//        interpreter.run(inputTensor.getBuffer(), outputTensor.getBuffer());
+//
+//        ByteBuffer outputBuffer = outputTensor.getBuffer();
+//        outputBuffer.rewind();
+//        float[] floatArray = new float[outputBuffer.remaining()];
+//        for (int i = 0; i < floatArray.length; i++) {
+//            floatArray[i] = (float) (outputBuffer.get() & 0xFF);
+//        }
+//
+//        if (mapType == MapType.DEPTHVIEW_GRAYSCALE) {
+//            return ImageUtils.toGrayscaleBitmap(floatArray, INPUT_IMAGE_DIM);
+//        } else {
+//            return ImageUtils.toHeatMapBitmap(floatArray, INPUT_IMAGE_DIM);
+//        }
+//    }
+//
+//    public void close() {
+//        if (interpreter != null) {
+//            interpreter.close();
+//            interpreter = null;
+//        }
+//    }
+//}
 package org.openbot.depthDetection;
 
 import android.content.Context;
@@ -127,8 +223,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 
 public class MidasNetSmall {
-    // CHANGE 1: Point to your new quantized model file
-    private static final String MODEL_NAME = "Midas-V2_w8a8.tflite"; // Or your exact filename
+    private static final String MODEL_NAME = "Midas-V2_w8a8.tflite";
     private static final int INPUT_IMAGE_DIM = 256;
     private static final int NUM_THREADS = 4;
 
@@ -136,33 +231,11 @@ public class MidasNetSmall {
     private final ImageProcessor inputTensorProcessor;
     private MapType mapType;
 
-    public float[] getDepthMapFloatArray(Bitmap inputImage) {
-        TensorImage inputTensor = TensorImage.fromBitmap(inputImage);
-        inputTensor = inputTensorProcessor.process(inputTensor);
-
-        TensorBuffer outputTensor = TensorBuffer.createFixedSize(
-                new int[]{1, INPUT_IMAGE_DIM, INPUT_IMAGE_DIM, 1},
-                DataType.UINT8
-        );
-
-        interpreter.run(inputTensor.getBuffer(), outputTensor.getBuffer());
-
-        ByteBuffer outputBuffer = outputTensor.getBuffer();
-        outputBuffer.rewind(); // Important: reset buffer position to the beginning
-        float[] floatArray = new float[outputBuffer.remaining()];
-        for (int i = 0; i < floatArray.length; i++) {
-            // Convert the unsigned byte (0-255) to a float
-            floatArray[i] = (float) (outputBuffer.get() & 0xFF);
-        }
-        return floatArray;
-    }
-
     public MidasNetSmall(Context context, MapType mapType) throws IOException {
         this.mapType = mapType;
 
         inputTensorProcessor = new ImageProcessor.Builder()
                 .add(new ResizeOp(INPUT_IMAGE_DIM, INPUT_IMAGE_DIM, ResizeOp.ResizeMethod.BILINEAR))
-                // .add(new NormalizeOp(NORM_MEAN, NORM_STD)) // <-- REMOVED
                 .build();
 
         Interpreter.Options options = new Interpreter.Options();
@@ -176,23 +249,36 @@ public class MidasNetSmall {
         interpreter = new Interpreter(FileUtil.loadMappedFile(context, MODEL_NAME), options);
     }
 
-    public Bitmap getDepthMap(Bitmap inputImage) {
+    /**
+     * This is now the primary method. It runs inference and returns the raw data.
+     */
+    public float[] getDepthMapFloatArray(Bitmap inputImage) {
         TensorImage inputTensor = TensorImage.fromBitmap(inputImage);
         inputTensor = inputTensorProcessor.process(inputTensor);
 
         TensorBuffer outputTensor = TensorBuffer.createFixedSize(
-                new int[]{1, INPUT_IMAGE_DIM, INPUT_IMAGE_DIM, 1}, // Batch size of 1
+                new int[]{1, INPUT_IMAGE_DIM, INPUT_IMAGE_DIM, 1},
                 DataType.UINT8
         );
 
         interpreter.run(inputTensor.getBuffer(), outputTensor.getBuffer());
 
         ByteBuffer outputBuffer = outputTensor.getBuffer();
-        outputBuffer.rewind();
+        outputBuffer.rewind(); // Important: reset buffer position
         float[] floatArray = new float[outputBuffer.remaining()];
         for (int i = 0; i < floatArray.length; i++) {
+            // Convert the unsigned byte (0-255) to a float
             floatArray[i] = (float) (outputBuffer.get() & 0xFF);
         }
+        return floatArray;
+    }
+
+    /**
+     * This method is now a convenient wrapper for creating a Bitmap.
+     * It no longer runs the model itself.
+     */
+    public Bitmap getDepthMap(Bitmap inputImage) {
+        float[] floatArray = getDepthMapFloatArray(inputImage);
 
         if (mapType == MapType.DEPTHVIEW_GRAYSCALE) {
             return ImageUtils.toGrayscaleBitmap(floatArray, INPUT_IMAGE_DIM);

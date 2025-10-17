@@ -30,7 +30,6 @@ import androidx.camera.core.ImageProxy;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 import androidx.navigation.Navigation;
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
-import com.google.mediapipe.examples.gesturerecognizer.GestureRecognizerHelper;
 
 import java.io.IOException;
 import java.util.LinkedList;
@@ -64,7 +63,6 @@ public class ObjectNavFragment extends CameraFragment {
 
   private BroadcastReceiver mqttReceiver;
 
-  private GestureRecognizerHelper gestureRecognizerHelper;
 
 
   private boolean computingNetwork = false;

@@ -24,20 +24,18 @@ public class DepthDetectionFragment extends CameraFragment {
     private static final String TAG = "DepthDetectionFragment";
     private MidasNetSmall midasNet;
     private ImageView depthMapView;
+    // This is our threshold. Lower values mean closer.
+    // 25 is a good starting point. You can adjust it by testing.
+    private static final float CLOSENESS_THRESHOLD = 25.0f;
+    private static final int DEPTH_IMAGE_DIM = 256;
 
     // Declare the binding object
     private FragmentDepthDetectionBinding binding;
-
-    private Bitmap rotatedBitmap;
-    private int sensorOrientation;
-
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
-        // *** THE CORRECT PATTERN FROM ObjectNavFragment ***
-        // 1. Inflate the layout using the binding class
+
         binding = FragmentDepthDetectionBinding.inflate(inflater, container, false);
 
-        // 2. Pass the root of the binding to the parent's special method
         return inflateFragment(binding, inflater, container);
     }
 
@@ -47,15 +45,12 @@ public class DepthDetectionFragment extends CameraFragment {
 
         ImageView cameraToggleButton = binding.cameraToggleButton;
 
-        sensorOrientation = 90 - ImageUtils.getScreenOrientation(requireActivity());
 
         // Set a click listener
         cameraToggleButton.setOnClickListener(v -> {
-            // Call the public toggleCamera() method from the parent CameraFragment
             toggleCamera();
         });
 
-        // Access the ImageView via the binding object, not findViewById
         depthMapView = binding.depthMapView;
 
         try {
@@ -72,30 +67,30 @@ public class DepthDetectionFragment extends CameraFragment {
             return;
         }
 
-        // 1. Get the original depth map from the model. It will be incorrectly rotated.
-        Bitmap originalDepthMap = midasNet.getDepthMap(image);
-
-        // 2. Create a transformation matrix to fix the rotation.
-        // A 90-degree clockwise rotation is needed to make it upright.
+        // 1. Create a matrix to rotate the incoming camera frame.
         Matrix matrix = new Matrix();
         matrix.postRotate(90f);
 
-        // 3. Create a new, correctly oriented bitmap from the original depth map.
-        Bitmap rotatedDepthMap = Bitmap.createBitmap(
-                originalDepthMap,
-                0,                                // Start at x=0
-                0,                                // Start at y=0
-                originalDepthMap.getWidth(),      // Use the full width
-                originalDepthMap.getHeight(),     // Use the full height
+        // 2. Create a new, correctly oriented bitmap from the original camera frame.
+        Bitmap rotatedFrame = Bitmap.createBitmap(
+                image,
+                0,
+                0,
+                image.getWidth(),
+                image.getHeight(),
                 matrix,
                 true
         );
 
-        // 4. Display the final, corrected bitmap on the screen.
+        // 3. Run inference on the CORRECTLY ROTATED frame.
+        // The output from the model will now be upright.
+        Bitmap finalDepthMap = midasNet.getDepthMap(rotatedFrame);
+
+        // 4. Display the result directly. No second rotation is needed.
         if (getActivity() != null) {
             getActivity().runOnUiThread(() -> {
                 if (depthMapView != null) {
-                    depthMapView.setImageBitmap(rotatedDepthMap);
+                    depthMapView.setImageBitmap(finalDepthMap);
                 }
             });
         }
