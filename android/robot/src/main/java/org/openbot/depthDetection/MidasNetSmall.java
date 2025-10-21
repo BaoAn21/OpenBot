@@ -2,6 +2,8 @@ package org.openbot.depthDetection;
 
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.os.SystemClock;
+
 import org.tensorflow.lite.DataType;
 import org.tensorflow.lite.Interpreter;
 import org.tensorflow.lite.gpu.CompatibilityList;
@@ -37,6 +39,8 @@ public class MidasNetSmall {
     private final ImageProcessor inputTensorProcessor;
     private final TensorProcessor outputTensorProcessor;
     private MapType mapType;
+    private long lastInferenceTimeMs = 0;
+
 
     public MidasNetSmall(Context context, MapType mapType, ModelType modelType) throws IOException {
         this.mapType = mapType;
@@ -70,12 +74,15 @@ public class MidasNetSmall {
         TensorImage inputTensor = TensorImage.fromBitmap(inputImage);
         inputTensor = inputTensorProcessor.process(inputTensor);
 
+        long startTime = SystemClock.uptimeMillis();
+
         if (modelType == ModelType.FLOAT) {
             TensorBuffer outputTensor = TensorBufferFloat.createFixedSize(
                     new int[]{1, INPUT_IMAGE_DIM, INPUT_IMAGE_DIM, 1},
                     DataType.FLOAT32
             );
             interpreter.run(inputTensor.getBuffer(), outputTensor.getBuffer());
+            lastInferenceTimeMs = SystemClock.uptimeMillis() - startTime;
             outputTensor = outputTensorProcessor.process(outputTensor);
             return outputTensor.getFloatArray();
         } else { // ModelType.QUANTIZED
@@ -84,6 +91,7 @@ public class MidasNetSmall {
                     DataType.UINT8
             );
             interpreter.run(inputTensor.getBuffer(), outputTensor.getBuffer());
+            lastInferenceTimeMs = SystemClock.uptimeMillis() - startTime;
             ByteBuffer outputBuffer = outputTensor.getBuffer();
             outputBuffer.rewind();
             float[] floatArray = new float[outputBuffer.remaining()];
@@ -105,6 +113,10 @@ public class MidasNetSmall {
             return ImageUtils.toHeatMapBitmap(floatArray, INPUT_IMAGE_DIM);
         }
     }
+    public long getLastInferenceTimeMs() {
+        return lastInferenceTimeMs;
+    }
+
 
     public void close() {
         if (interpreter != null) {

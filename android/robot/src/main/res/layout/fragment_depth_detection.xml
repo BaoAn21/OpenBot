@@ -11,9 +11,10 @@
         android:layout_height="wrap_content"
         android:background="@drawable/bottom_sheet_bg"
         app:behavior_hideable="false"
-        app:behavior_peekHeight="120dp"
+        app:behavior_peekHeight="160dp"
         app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior">
 
+        <!-- Handle -->
         <View
             android:id="@+id/view"
             android:layout_width="48dp"
@@ -25,6 +26,7 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
 
+        <!-- Camera Toggle Button -->
         <ImageView
             android:id="@+id/camera_toggle_button"
             android:layout_width="48dp"
@@ -37,7 +39,9 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintTop_toBottomOf="@id/view" />
 
+        <!-- Speed Control Section -->
         <LinearLayout
+            android:id="@+id/speed_control_layout"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="16dp"
@@ -46,21 +50,19 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="@id/camera_toggle_button"
             app:layout_constraintBottom_toBottomOf="@id/camera_toggle_button">
-
+            <!-- Speed TextViews and ImageView -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Speed:"
                 android:textSize="16sp"
                 android:textColor="@android:color/black" />
-
             <ImageView
                 android:id="@+id/speed_mode_button"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:layout_marginStart="8dp"
                 android:src="@drawable/ic_speed_medium" />
-
             <TextView
                 android:id="@+id/speed_info_textview"
                 android:layout_width="wrap_content"
@@ -71,6 +73,17 @@
                 android:textColor="@android:color/black" />
         </LinearLayout>
 
-    </androidx.constraintlayout.widget.ConstraintLayout>
+        <!-- ADD THIS TEXTVIEW FOR INFERENCE TIME -->
+        <TextView
+            android:id="@+id/inference_time_textview"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Inference: --- ms"
+            android:textSize="16sp"
+            android:textColor="@android:color/black"
+            app:layout_constraintStart_toStartOf="@id/speed_control_layout"
+            app:layout_constraintTop_toBottomOf="@id/speed_control_layout" />
 
+    </androidx.constraintlayout.widget.ConstraintLayout>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

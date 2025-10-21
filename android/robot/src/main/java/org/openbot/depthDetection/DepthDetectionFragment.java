@@ -70,6 +70,11 @@ public class DepthDetectionFragment extends CameraFragment {
         );
 
         float[] depthValues = midasNet.getDepthMapFloatArray(rotatedFrame);
+        long inferenceTime = midasNet.getLastInferenceTimeMs();
+
+        // **** ADD THIS LINE TO LOG THE TIME ****
+        Log.i(TAG, "Inference Time: " + midasNet.getLastInferenceTimeMs() + " ms");
+        // *************************************
 
         debugLogCenterValues(depthValues);
 
@@ -79,6 +84,15 @@ public class DepthDetectionFragment extends CameraFragment {
             vehicle.setControl(0, 0);
         } else {
             vehicle.setControl(FORWARD_SPEED, FORWARD_SPEED);
+        }
+        if (getActivity() != null) {
+            getActivity().runOnUiThread(() -> {
+                if (binding != null) {
+                    binding.inferenceTimeTextview.setText(
+                            String.format(Locale.US, "Inference: %d ms", inferenceTime)
+                    );
+                }
+            });
         }
     }
 
