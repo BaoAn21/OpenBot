@@ -16,17 +16,22 @@ import org.openbot.databinding.FragmentDepthDetectionBinding;
 import org.openbot.utils.Enums;
 import java.io.IOException;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class DepthDetectionFragment extends CameraFragment {
 
     private static final String TAG = "DepthDetectionFragment";
     private static final int DEPTH_IMAGE_DIM = 256;
     private static final float FORWARD_SPEED = 0.25f;
-    private static final float CLOSENESS_THRESHOLD = 100.0f;
-
+//    private static final float CLOSENESS_THRESHOLD = 100.0f;
+    private float closenessThreshold = 100.0f;
     private MidasNetSmall midasNet;
     private FragmentDepthDetectionBinding binding;
     private Enums.SpeedMode currentSpeedMode;
+
+    private final AtomicBoolean isProcessingFrame = new AtomicBoolean(false);
+
+    private ModelType currentModelType = ModelType.FLOAT; // Default to FLOAT model
 
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
@@ -38,10 +43,32 @@ public class DepthDetectionFragment extends CameraFragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
+        updateThresholdDisplay(); // Update the TextView with the initial value
+        // ----------------------------------------------------
+
+        // --- SETUP THRESHOLD BUTTON LISTENERS ---
+        binding.plusThresholdButton.setOnClickListener(v -> {
+            // Increase threshold, max 255
+            closenessThreshold = Math.min(closenessThreshold + 5.0f, 255.0f);
+            updateThresholdDisplay();
+            // You might want to save the new value to SharedPreferences here
+        });
+        binding.minusThresholdButton.setOnClickListener(v -> {
+            // Decrease threshold, min 0
+            closenessThreshold = Math.max(closenessThreshold - 5.0f, 0.0f);
+            updateThresholdDisplay();
+            // You might want to save the new value to SharedPreferences here
+        });
+
         binding.cameraToggleButton.setOnClickListener(v -> toggleCamera());
         binding.speedModeButton.setOnClickListener(v -> {
             currentSpeedMode = Enums.toggleSpeed(Enums.Direction.CYCLIC.getValue(), currentSpeedMode);
             setSpeedMode(currentSpeedMode);
+        });
+        binding.modelSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            // isChecked will be true for Quantized, false for Float
+            ModelType newModel = isChecked ? ModelType.QUANTIZED : ModelType.FLOAT;
+            reinitializeModel(newModel);
         });
 
         currentSpeedMode = Enums.SpeedMode.getByID(preferencesManager.getSpeedMode());
@@ -50,6 +77,7 @@ public class DepthDetectionFragment extends CameraFragment {
         try {
             midasNet = new MidasNetSmall(requireActivity(), MapType.DEPTHVIEW_GRAYSCALE, ModelType.FLOAT);
             Log.d(TAG, "MiDAS model initialized successfully.");
+            isProcessingFrame.set(true);
         } catch (IOException e) {
             Log.e(TAG, "Failed to initialize MiDAS model", e);
         }
@@ -57,10 +85,20 @@ public class DepthDetectionFragment extends CameraFragment {
 
     @Override
     protected void processFrame(Bitmap image, ImageProxy imageProxy) {
-        if (vehicle == null || midasNet == null || image == null) {
-            return;
-        }
+        // --- GRAB LOCAL REFERENCE AFTER FLAG CHECK ---
+        // Capture the current midasNet instance *after* checking the flag.
+        MidasNetSmall currentMidasNet = this.midasNet;
 
+        // Check the flag AND the local reference
+        if (!isProcessingFrame.get() || vehicle == null || currentMidasNet == null || image == null) {
+            if (imageProxy != null) {
+                imageProxy.close();
+            }
+            return; // Exit immediately if processing stopped or model is null
+        }
+        // ---------------------------------------------
+
+        // --- Use the local reference 'currentMidasNet' from now on ---
         Matrix matrix = new Matrix();
         matrix.postRotate(90f);
         Bitmap rotatedFrame = Bitmap.createBitmap(
@@ -69,32 +107,82 @@ public class DepthDetectionFragment extends CameraFragment {
                 matrix, true
         );
 
-        float[] depthValues = midasNet.getDepthMapFloatArray(rotatedFrame);
-        long inferenceTime = midasNet.getLastInferenceTimeMs();
 
-        // **** ADD THIS LINE TO LOG THE TIME ****
-        Log.i(TAG, "Inference Time: " + midasNet.getLastInferenceTimeMs() + " ms");
-        // *************************************
 
-        debugLogCenterValues(depthValues);
+        // Use the local reference
+        float[] depthValues = currentMidasNet.getDepthMapFloatArray(rotatedFrame);
+        long inferenceTime = currentMidasNet.getLastInferenceTimeMs();
 
+        Log.i(TAG, "Inference Time: " + inferenceTime + " ms");
+//        debugLogCenterValues(depthValues);
         boolean isObjectClose = analyzeDepthData(depthValues);
-
+        String currentStatus;
+        // Vehicle control uses the class member 'vehicle'
         if (isObjectClose) {
             vehicle.setControl(0, 0);
+            currentStatus = "STOPPED";
         } else {
             vehicle.setControl(FORWARD_SPEED, FORWARD_SPEED);
+            currentStatus = "MOVING";
         }
+
+        // Update UI
         if (getActivity() != null) {
             getActivity().runOnUiThread(() -> {
                 if (binding != null) {
                     binding.inferenceTimeTextview.setText(
                             String.format(Locale.US, "Inference: %d ms", inferenceTime)
                     );
+                    binding.statusTextview.setText("Status: " + currentStatus);
                 }
             });
         }
     }
+
+    private void reinitializeModel(ModelType newModelType) {
+        isProcessingFrame.set(false);
+        runOnBackgroundThread(() -> {
+            if (midasNet != null) {
+                midasNet.close();
+                midasNet = null;
+                Log.d(TAG, "Previous MiDAS model closed.");
+            }
+
+            currentModelType = newModelType;
+
+            try {
+                midasNet = new MidasNetSmall(requireActivity(), MapType.DEPTHVIEW_GRAYSCALE, currentModelType);
+                Log.d(TAG, "MiDAS model re-initialized successfully: " + currentModelType + " on thread: " + Thread.currentThread().getName());
+
+                isProcessingFrame.set(true);
+                Log.d(TAG, "Re-enabled frame processing."); // Add log
+                if (getActivity() != null) {
+                    getActivity().runOnUiThread(() -> {
+                        if (binding != null) {
+                            binding.modelTypeTextview.setText(currentModelType.toString());
+                        }
+                    });
+                }
+
+            } catch (IOException e) {
+                Log.e(TAG, "Failed to re-initialize MiDAS model", e);
+            } catch (IllegalStateException e) {
+                Log.e(TAG, "IllegalStateException during model re-initialization", e);
+            } catch (Exception e) { // Catch any other potential native errors
+                Log.e(TAG, "Unexpected error during model re-initialization", e);
+            }
+        });
+        // No 'else' block needed, as the helper method handles the null check internally.
+    }
+
+    // --- ADD THIS HELPER METHOD ---
+    private void updateThresholdDisplay() {
+        if (binding != null) {
+            // Update the TextView to show the current threshold value
+            binding.thresholdValueTextview.setText(String.format(Locale.US, "%.0f", closenessThreshold));
+        }
+    }
+    // ----------------------------
 
     private boolean analyzeDepthData(float[] depthValues) {
         int zoneSize = 10;
@@ -110,7 +198,7 @@ public class DepthDetectionFragment extends CameraFragment {
             }
         }
         float averageDistanceValue = sumOfValues / pixelCount;
-        boolean isClose = averageDistanceValue > CLOSENESS_THRESHOLD;
+        boolean isClose = averageDistanceValue > closenessThreshold;
         if (isClose) {
             Log.d(TAG, "DANGER: Object is very close! Average value: " + averageDistanceValue);
         }
@@ -157,11 +245,40 @@ public class DepthDetectionFragment extends CameraFragment {
 
     @Override
     public void onDestroyView() {
-        super.onDestroyView();
-        binding = null;
-        if (midasNet != null) {
-            midasNet.close();
+        Log.d(TAG, "onDestroyView: Starting cleanup...");
+
+        // 1. Immediately signal processing to stop
+        isProcessingFrame.set(false);
+        Log.d(TAG, "onDestroyView: Processing flag set to false.");
+
+        // 2. Capture the current instance if it exists
+        MidasNetSmall netToClose = midasNet;
+
+        // 3. Set the field to null *after* capturing the reference to close.
+        // This slightly reduces the chance of the race condition, but the
+        // primary safeguard is the isProcessingFrame check + local var in processFrame.
+        midasNet = null;
+        Log.d(TAG, "onDestroyView: midasNet field set to null.");
+
+        // 4. Schedule the actual closure on the background thread
+        if (netToClose != null) {
+            runOnBackgroundThread(() -> {
+                try {
+                    Log.d(TAG, "onDestroyView: Closing MidasNet instance on background thread...");
+                    netToClose.close(); // Close the captured instance
+                    Log.d(TAG, "onDestroyView: MidasNet instance closed successfully.");
+                } catch (Exception e) {
+                    Log.e(TAG, "onDestroyView: Error closing MidasNet on background thread", e);
+                }
+            });
         }
+
+        // 5. Call super (which will eventually shut down the executor)
+        super.onDestroyView();
+
+        // 6. Nullify binding
+        binding = null;
+        Log.d(TAG, "onDestroyView: Cleanup initiated.");
     }
 
     @Override

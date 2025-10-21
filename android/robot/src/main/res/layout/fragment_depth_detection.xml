@@ -11,10 +11,9 @@
         android:layout_height="wrap_content"
         android:background="@drawable/bottom_sheet_bg"
         app:behavior_hideable="false"
-        app:behavior_peekHeight="160dp"
+        app:behavior_peekHeight="280dp"
         app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior">
 
-        <!-- Handle -->
         <View
             android:id="@+id/view"
             android:layout_width="48dp"
@@ -26,7 +25,6 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
 
-        <!-- Camera Toggle Button -->
         <ImageView
             android:id="@+id/camera_toggle_button"
             android:layout_width="48dp"
@@ -39,7 +37,6 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintTop_toBottomOf="@id/view" />
 
-        <!-- Speed Control Section -->
         <LinearLayout
             android:id="@+id/speed_control_layout"
             android:layout_width="wrap_content"
@@ -50,7 +47,6 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="@id/camera_toggle_button"
             app:layout_constraintBottom_toBottomOf="@id/camera_toggle_button">
-            <!-- Speed TextViews and ImageView -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -73,7 +69,6 @@
                 android:textColor="@android:color/black" />
         </LinearLayout>
 
-        <!-- ADD THIS TEXTVIEW FOR INFERENCE TIME -->
         <TextView
             android:id="@+id/inference_time_textview"
             android:layout_width="wrap_content"
@@ -85,5 +80,94 @@
             app:layout_constraintStart_toStartOf="@id/speed_control_layout"
             app:layout_constraintTop_toBottomOf="@id/speed_control_layout" />
 
+        <LinearLayout
+            android:id="@+id/model_switch_layout"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center_vertical"
+            app:layout_constraintStart_toStartOf="@id/inference_time_textview"
+            app:layout_constraintTop_toBottomOf="@id/inference_time_textview"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintEnd_toStartOf="@id/camera_toggle_button"
+            android:layout_marginEnd="16dp">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Model:"
+                android:textSize="16sp"
+                android:textColor="@android:color/black" />
+            <TextView
+                android:id="@+id/model_type_textview"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="FLOAT"
+                android:textSize="16sp"
+                android:textColor="@android:color/black"
+                android:textStyle="bold" />
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/model_switch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:text="Use Quantized" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/threshold_control_layout"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center_vertical"
+            app:layout_constraintStart_toStartOf="@id/model_switch_layout"
+            app:layout_constraintTop_toBottomOf="@id/model_switch_layout"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintEnd_toStartOf="@id/camera_toggle_button"
+            android:layout_marginEnd="16dp">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Threshold:"
+                android:textSize="16sp"
+                android:textColor="@android:color/black" />
+            <ImageView
+                android:id="@+id/minus_threshold_button"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="16dp"
+                android:background="@drawable/spinner_bg"
+                android:contentDescription="@string/minus"
+                android:src="@drawable/ic_baseline_remove" />
+            <TextView
+                android:id="@+id/threshold_value_textview"
+                android:layout_width="60dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:gravity="center"
+                android:text="180"
+                android:textColor="@android:color/black"
+                android:textSize="16sp" />
+            <ImageView
+                android:id="@+id/plus_threshold_button"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/spinner_bg"
+                android:contentDescription="@string/plus"
+                android:src="@drawable/ic_baseline_add" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/status_textview"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Status: STOPPED"
+            android:textSize="16sp"
+            android:textColor="@android:color/black"
+            android:textStyle="bold"
+            app:layout_constraintStart_toStartOf="@id/threshold_control_layout"
+            app:layout_constraintTop_toBottomOf="@id/threshold_control_layout" />
     </androidx.constraintlayout.widget.ConstraintLayout>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

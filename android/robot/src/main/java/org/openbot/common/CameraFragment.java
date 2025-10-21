@@ -183,6 +183,16 @@ public abstract class CameraFragment extends ControlsFragment {
     bindCameraUseCases();
   }
 
+  protected void runOnBackgroundThread(Runnable runnable) {
+    if (cameraExecutor != null) {
+      cameraExecutor.execute(runnable);
+    } else {
+      Timber.e("cameraExecutor is null. Cannot run task on background thread.");
+      // Optionally, run on UI thread or handle the error differently
+      // requireActivity().runOnUiThread(runnable);
+    }
+  }
+
   public void setAnalyserResolution(Size resolutionSize) {
     if (resolutionSize == null) analyserResolution = null;
     else {
