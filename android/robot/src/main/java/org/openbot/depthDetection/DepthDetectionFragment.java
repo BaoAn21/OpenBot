@@ -1,6 +1,7 @@
 package org.openbot.depthDetection;
 
 import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.graphics.Matrix;
 import android.os.Bundle;
 import android.util.Log;
@@ -13,6 +14,7 @@ import androidx.camera.core.ImageProxy;
 import org.openbot.R;
 import org.openbot.common.CameraFragment;
 import org.openbot.databinding.FragmentDepthDetectionBinding;
+import org.openbot.utils.Constants;
 import org.openbot.utils.Enums;
 import java.io.IOException;
 import java.util.Locale;
@@ -28,10 +30,11 @@ public class DepthDetectionFragment extends CameraFragment {
     private MidasNetSmall midasNet;
     private FragmentDepthDetectionBinding binding;
     private Enums.SpeedMode currentSpeedMode;
+    private boolean isAutopilotActive = false;
 
     private final AtomicBoolean isProcessingFrame = new AtomicBoolean(false);
 
-    private ModelType currentModelType = ModelType.FLOAT; // Default to FLOAT model
+    private ModelType currentModelType = ModelType.QUANTIZED; // Default to FLOAT model
 
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
@@ -45,6 +48,7 @@ public class DepthDetectionFragment extends CameraFragment {
 
         updateThresholdDisplay(); // Update the TextView with the initial value
         // ----------------------------------------------------
+        updateAutopilotStatusUI();
 
         // --- SETUP THRESHOLD BUTTON LISTENERS ---
         binding.plusThresholdButton.setOnClickListener(v -> {
@@ -87,6 +91,9 @@ public class DepthDetectionFragment extends CameraFragment {
     protected void processFrame(Bitmap image, ImageProxy imageProxy) {
         // --- GRAB LOCAL REFERENCE AFTER FLAG CHECK ---
         // Capture the current midasNet instance *after* checking the flag.
+        long inferenceTime = 0;
+        String currentStatus = "MANUAL";
+        if (isAutopilotActive) {
         MidasNetSmall currentMidasNet = this.midasNet;
 
         // Check the flag AND the local reference
@@ -111,33 +118,58 @@ public class DepthDetectionFragment extends CameraFragment {
 
         // Use the local reference
         float[] depthValues = currentMidasNet.getDepthMapFloatArray(rotatedFrame);
-        long inferenceTime = currentMidasNet.getLastInferenceTimeMs();
+        inferenceTime = currentMidasNet.getLastInferenceTimeMs();
 
         Log.i(TAG, "Inference Time: " + inferenceTime + " ms");
 //        debugLogCenterValues(depthValues);
-        boolean isObjectClose = analyzeDepthData(depthValues);
-        String currentStatus;
-        // Vehicle control uses the class member 'vehicle'
-        if (isObjectClose) {
-            vehicle.setControl(0, 0);
-            currentStatus = "STOPPED";
+
+        // --- Only run analysis and control IF autopilot is active ---
+        // Default status when autopilot is off
+
+            boolean isObjectClose = analyzeDepthData(depthValues);
+
+            if (isObjectClose) {
+                vehicle.setControl(0, 0); // Autopilot stops
+                currentStatus = "STOPPED (Obstacle)";
+            } else {
+                vehicle.setControl(FORWARD_SPEED, FORWARD_SPEED); // Autopilot moves
+                currentStatus = "MOVING FORWARD (Auto)";
+            }
         } else {
-            vehicle.setControl(FORWARD_SPEED, FORWARD_SPEED);
-            currentStatus = "MOVING";
+            // If autopilot is OFF, DO NOT send any control commands here.
+            // Control comes from the gamepad via the parent fragment.
+            // We just set the status text.
         }
+        // ------------------------------------------------------------
 
         // Update UI
+        final String statusToDisplay = currentStatus;
+        final long timeToDisplay = inferenceTime;
         if (getActivity() != null) {
             getActivity().runOnUiThread(() -> {
                 if (binding != null) {
                     binding.inferenceTimeTextview.setText(
-                            String.format(Locale.US, "Inference: %d ms", inferenceTime)
+                            String.format(Locale.US, "Inference: %d ms", timeToDisplay)
                     );
-                    binding.statusTextview.setText("Status: " + currentStatus);
+                    binding.statusTextview.setText("Status: " + statusToDisplay);
                 }
             });
         }
     }
+
+    // --- ADD HELPER TO UPDATE AUTOPILOT UI ---
+    private void updateAutopilotStatusUI() {
+        if (binding != null) {
+            if (isAutopilotActive) {
+                binding.autopilotStatusTextview.setText("Autopilot: ON");
+                binding.autopilotStatusTextview.setTextColor(Color.GREEN);
+            } else {
+                binding.autopilotStatusTextview.setText("Autopilot: OFF");
+                binding.autopilotStatusTextview.setTextColor(Color.RED);
+            }
+        }
+    }
+    // -----------------------------------------
 
     private void reinitializeModel(ModelType newModelType) {
         isProcessingFrame.set(false);
@@ -292,6 +324,27 @@ public class DepthDetectionFragment extends CameraFragment {
 
     @Override
     protected void processControllerKeyData(String command) {
-        // Not used
+        if (command == null) return;
+
+        switch (command) {
+            case Constants.CMD_NETWORK: // Assuming "NETWORK" is the command for your toggle button
+                // Toggle the autopilot state
+                isAutopilotActive = !isAutopilotActive;
+                Log.d(TAG, "Autopilot toggled: " + isAutopilotActive);
+
+                // IMPORTANT: Stop the robot immediately if autopilot is turned OFF
+                if (!isAutopilotActive && vehicle != null) {
+                    vehicle.setControl(0, 0);
+                    Log.d(TAG, "Autopilot OFF. Sending STOP command.");
+                }
+
+                // Update the UI text
+                updateAutopilotStatusUI();
+                break;
+
+            // Add cases for other controller commands if needed in this fragment
+            // case Constants.CMD_SPEED_UP:
+            //    break;
+        }
     }
 }

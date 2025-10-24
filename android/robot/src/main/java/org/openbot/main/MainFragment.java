@@ -77,6 +77,11 @@ public class MainFragment extends Fragment implements OnItemClickListener<SubCat
             .navigate(R.id.action_mainFragment_to_robotInfoFragment);
         break;
 
+      case FeatureList.LINE_TRACKING:
+        Navigation.findNavController(requireView())
+                .navigate(R.id.action_mainFragment_to_lineTrackingFragment);
+        break;
+
       case FeatureList.AUTOPILOT:
         Navigation.findNavController(requireView())
             .navigate(R.id.action_mainFragment_to_autopilotFragment);

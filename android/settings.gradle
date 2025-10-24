@@ -1,2 +1,3 @@
 include ':robot', ':controller'
 include ':comlib'
+include ':opencv'

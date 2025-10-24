@@ -26,7 +26,7 @@ enum ModelType {
 }
 
 public class MidasNetSmall {
-    private static final String MODEL_FLOAT_NAME = "lite-model_midas_v2_1_small_1_lite_1.tflite";
+    private static final String MODEL_FLOAT_NAME = "Midas-V2_float.tflite";
     private static final String MODEL_QUANTIZED_NAME = "Midas-V2_w8a8.tflite";
     private static final int INPUT_IMAGE_DIM = 256;
     private static final int NUM_THREADS = 4;

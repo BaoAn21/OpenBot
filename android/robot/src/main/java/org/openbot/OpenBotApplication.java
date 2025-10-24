@@ -14,6 +14,7 @@ import org.openbot.mqtt.MqttService;
 import org.openbot.objectbox.ObjectBox;
 import org.openbot.objectbox.entity.LogEntry;
 import org.openbot.vehicle.Vehicle;
+import org.opencv.android.OpenCVLoader;
 
 import io.objectbox.Box;
 import io.objectbox.BoxStore;
@@ -51,6 +52,12 @@ public class OpenBotApplication extends Application {
 
     LogEntry retrievedLog = logBox.get(testLog.id);
     Log.d(TAG, "Retrieved Log Entry: " + retrievedLog.toString());
+    // ---- //
+    if (OpenCVLoader.initLocal()) {
+      Log.d(TAG, "OpenCV success");
+    } else {
+      Log.d(TAG, "OpenCV failed");
+    }
 
     SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
     int baudRate = Integer.parseInt(sharedPreferences.getString("baud_rate", "115200"));

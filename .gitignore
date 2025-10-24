@@ -17,3 +17,4 @@ wandb/
 # build
 /bin
 /node_modules/
+/opencv

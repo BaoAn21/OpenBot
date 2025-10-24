@@ -46,6 +46,10 @@
         <action
             android:id="@+id/action_mainFragment_to_depthDetectionFragment"
             app:destination="@id/depthDetectionFragment" />
+        <action
+            android:id="@+id/action_mainFragment_to_lineTrackingFragment"
+            app:destination="@id/lineTrackingFragment" />
+
     </fragment>
     <fragment
         android:id="@+id/freeRoamFragment"
@@ -192,4 +196,9 @@
         android:name="org.openbot.depthDetection.DepthDetectionFragment"
         android:label="fragment_depth_detection"
         tools:layout="@layout/fragment_depth_detection" />
+    <fragment
+        android:id="@+id/lineTrackingFragment"
+        android:name="org.openbot.lineTracking.LineTrackingFragment"
+        android:label="Line Tracking"
+        tools:layout="@layout/fragment_line_tracking" />
 </navigation>

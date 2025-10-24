@@ -66,6 +66,7 @@ public class FeatureList {
   public static final String SENSORS_FROM_PHONE = "Sensors from Phone";
   public static final String MAP_VIEW = "Map View";
   // endregion
+  public static final String LINE_TRACKING = "Line Tracking";
 
   @NotNull
   public static ArrayList<Category> getCategories() {
@@ -82,6 +83,7 @@ public class FeatureList {
     categories.add(new Category(GENERAL, subCategories));
 
     subCategories = new ArrayList<>();
+    subCategories.add(new SubCategory(LINE_TRACKING, R.drawable.ic_autopilot, "#E7CE88"));
     subCategories.add(new SubCategory(AUTOPILOT, R.drawable.ic_autopilot, "#44525F"));
     subCategories.add(new SubCategory(DEPTH_DETECTION, R.drawable.ic_autopilot, "#44525F"));
     subCategories.add(new SubCategory(OBJECT_NAV, R.drawable.ic_person_search, "#E7CE88"));

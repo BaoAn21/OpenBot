@@ -27,6 +27,7 @@ android {
         applicationId "org.openbot"
 //        minSdkVersion 21
         minSdkVersion 24
+        //noinspection ExpiredTargetSdkVersion
         targetSdkVersion 32
         ndk {
             abiFilters 'armeabi-v7a', 'arm64-v8a'
@@ -73,6 +74,7 @@ apply plugin: 'kotlin-android'
 def comlibDir = file("${project.rootDir}/comlib/libs")
 
 dependencies {
+    implementation project(':opencv')
 
     // WiFi direct + WebRTC
     implementation project(':comlib')
