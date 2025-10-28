@@ -30,7 +30,7 @@ public class DepthDetectionFragment extends CameraFragment {
     private MidasNetSmall midasNet;
     private FragmentDepthDetectionBinding binding;
     private Enums.SpeedMode currentSpeedMode;
-    private boolean isAutopilotActive = false;
+    private boolean isAutopilotActive = true;
 
     private final AtomicBoolean isProcessingFrame = new AtomicBoolean(false);
 
@@ -118,6 +118,8 @@ public class DepthDetectionFragment extends CameraFragment {
 
         // Use the local reference
         float[] depthValues = currentMidasNet.getDepthMapFloatArray(rotatedFrame);
+        // Send debug data
+//        NetworkUtils.sendDepthData(depthValues);
         inferenceTime = currentMidasNet.getLastInferenceTimeMs();
 
         Log.i(TAG, "Inference Time: " + inferenceTime + " ms");
@@ -217,7 +219,7 @@ public class DepthDetectionFragment extends CameraFragment {
     // ----------------------------
 
     private boolean analyzeDepthData(float[] depthValues) {
-        int zoneSize = 10;
+        int zoneSize = 20;
         int startX = (DEPTH_IMAGE_DIM / 2) - (zoneSize / 2);
         int startY = (DEPTH_IMAGE_DIM / 2) - (zoneSize / 2);
         float sumOfValues = 0;
@@ -235,6 +237,37 @@ public class DepthDetectionFragment extends CameraFragment {
             Log.d(TAG, "DANGER: Object is very close! Average value: " + averageDistanceValue);
         }
         return isClose;
+        // ----------------------------------------------------------
+//        if (depthValues == null || depthValues.length == 0) {
+//            Log.w(TAG, "analyzeDepthData: depthValues array is null or empty!");
+//            return false; // Cannot analyze if there's no data
+//        }
+//
+//        float sumOfValues = 0;
+//        int pixelCount = depthValues.length; // Total number of pixels
+//
+//        // Iterate through ALL depth values
+//        for (float value : depthValues) {
+//            sumOfValues += value;
+//        }
+//
+//        // Calculate the average depth value for the entire frame
+//        float averageDistanceValue = sumOfValues / pixelCount;
+//
+//        // Check if the overall average depth indicates closeness
+//        boolean isClose = averageDistanceValue > closenessThreshold;
+//
+//        if (isClose) {
+//            Log.d(TAG, String.format(Locale.US,
+//                    "DANGER: Average depth (%.2f) exceeds threshold (%.2f). Object potentially close.",
+//                    averageDistanceValue, closenessThreshold));
+//        } else {
+//            Log.d(TAG, String.format(Locale.US,
+//                    "INFO: Average depth (%.2f) is below threshold (%.2f). Path appears clear.",
+//                    averageDistanceValue, closenessThreshold));
+//        }
+//
+//        return isClose;
     }
 
     private void debugLogCenterValues(float[] depthValues) {
