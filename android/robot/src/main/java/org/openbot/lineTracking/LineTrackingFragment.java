@@ -12,19 +12,18 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.camera.core.ImageProxy;
 
-import org.opencv.android.Utils; // OpenCV utility
-import org.opencv.core.Core; // Core OpenCV functions
-import org.opencv.core.Mat; // OpenCV Matrix
-import org.opencv.core.MatOfPoint; // For contours
-import org.opencv.core.Point; // For points
-import org.opencv.core.Scalar; // For colors
-import org.opencv.core.Size; // For blur size
-import org.opencv.imgproc.Imgproc; // Image processing functions
+import org.opencv.android.Utils;
+import org.opencv.core.Core;
+import org.opencv.core.Mat;
+import org.opencv.core.Point;
+import org.opencv.core.Rect;
+import org.opencv.core.Scalar;
+import org.opencv.core.Size;
+import org.opencv.imgproc.Imgproc;
 
 import org.openbot.common.CameraFragment;
 import org.openbot.databinding.FragmentLineTrackingBinding;
-import org.openbot.vehicle.Control; // Import Control class
-import org.opencv.imgproc.Moments;
+import org.openbot.vehicle.Control;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -37,22 +36,23 @@ public class LineTrackingFragment extends CameraFragment {
 
     // --- OpenCV Mats ---
     private Mat matFrame;
-    private Mat matHsv;
-    private Mat matMask;
-    private Mat matHierarchy;
+    private Mat matGray;
+    private Mat matCanny;
+    private Mat matRoi; // Region of Interest
+    private Mat matHoughLines;
     // -------------------
 
-    // --- Line Color Thresholds (Example for Black Line) ---
-    // These values need tuning! Use an HSV color picker tool.
-    private Scalar lowerBlack = new Scalar(0, 0, 0);
-    private Scalar upperBlack = new Scalar(180, 255, 50); // Adjust Value (brightness) threshold
-    // ----------------------------------------------------
+    // --- Canny Thresholds ---
+    private static final double CANNY_THRESHOLD_1 = 50;
+    private static final double CANNY_THRESHOLD_2 = 150;
+    // ------------------------
 
     // --- Robot Control ---
-    private static final float FORWARD_SPEED = 0.25f; // Slow speed
-    private static final float TURN_SPEED = 0.35f;   // Adjust turn intensity
-    private ImageView processedImageView; // Add variable for ImageView
+    private static final float FORWARD_SPEED = 0.2f; // Keep it slow
+    private static final float Kp = 0.5f; // Proportional gain (TUNE THIS)
     // ---------------------
+
+    private ImageView processedImageView;
 
 
     @Override
@@ -65,99 +65,126 @@ public class LineTrackingFragment extends CameraFragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
         processedImageView = binding.processedImageView;
+
         // Initialize Mats once
         matFrame = new Mat();
-        matHsv = new Mat();
-        matMask = new Mat();
-        matHierarchy = new Mat();
-        Log.i(TAG, "LineTrackingFragment onViewCreated");
+        matGray = new Mat();
+        matCanny = new Mat();
+        matRoi = new Mat();
+        matHoughLines = new Mat();
+
+        Log.i(TAG, "LineTrackingFragment onViewCreated (Edge Following Mode)");
     }
 
     @Override
     protected void processFrame(Bitmap image, ImageProxy imageProxy) {
-        if (vehicle == null || image == null || matFrame == null || matHsv == null || matMask == null || matHierarchy == null) {
+        if (vehicle == null || image == null || matFrame == null || matGray == null || matCanny == null) {
             Log.e(TAG, "processFrame aborted: null objects");
-            if (imageProxy != null) imageProxy.close(); // Make sure proxy is closed if we abort early
+            if (imageProxy != null) imageProxy.close();
             return;
         }
 
-        // 1. Convert Bitmap to Mat
+        // 1. Convert Bitmap to Mat and Rotate
         Utils.bitmapToMat(image, matFrame);
+        Core.rotate(matFrame, matFrame, Core.ROTATE_90_CLOCKWISE);
 
-        // Optional: Rotation if needed
-        // Core.rotate(matFrame, matFrame, Core.ROTATE_90_CLOCKWISE);
+        // 2. Define Region of Interest (ROI) - Bottom half of the image
+        Rect roiRect = new Rect(0, matFrame.rows() / 2, matFrame.cols(), matFrame.rows() / 2);
+        matRoi = new Mat(matFrame, roiRect);
 
-        // --- Keep a clean copy FOR PROCESSING ---
-        Mat processingMat = matFrame.clone();
+        // 3. Process the ROI
+        Imgproc.cvtColor(matRoi, matGray, Imgproc.COLOR_RGB2GRAY);
+        Imgproc.GaussianBlur(matGray, matGray, new Size(5, 5), 0);
+        Imgproc.Canny(matGray, matCanny, CANNY_THRESHOLD_1, CANNY_THRESHOLD_2);
 
-        // 2. Convert processing copy to HSV
-        Imgproc.cvtColor(processingMat, matHsv, Imgproc.COLOR_RGB2HSV);
+        // 4. Find Lines with Hough Transform
+        matHoughLines = new Mat();
+        Imgproc.HoughLinesP(matCanny, matHoughLines, 1, Math.PI / 180, 50, 20, 10);
 
-        // 3. Create Binary Mask
-        Core.inRange(matHsv, lowerBlack, upperBlack, matMask);
+        // 5. Filter and Average Lines
+        List<Double> leftSlopes = new ArrayList<>();
+        List<Double> leftIntercepts = new ArrayList<>();
+        List<Double> rightSlopes = new ArrayList<>();
+        List<Double> rightIntercepts = new ArrayList<>();
 
-        // Optional Morphological Ops on matMask...
+        for (int i = 0; i < matHoughLines.rows(); i++) {
+            double[] line = matHoughLines.get(i, 0);
+            double x1 = line[0], y1 = line[1], x2 = line[2], y2 = line[3];
 
-        // 4. Find Contours (using the mask)
-        List<MatOfPoint> contours = new ArrayList<>();
-        Imgproc.findContours(matMask, contours, matHierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
+            // Calculate slope
+            double slope = (x1 == x2) ? 999 : (y2 - y1) / (x2 - x1);
+            double intercept = y1 - (slope * x1);
+            double angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
 
-        double maxArea = -1;
-        int maxAreaIdx = -1;
-        for (int i = 0; i < contours.size(); i++) {
-            double area = Imgproc.contourArea(contours.get(i));
-            if (area > maxArea) {
-                maxArea = area;
-                maxAreaIdx = i;
+            // Filter by angle/slope
+            if (Math.abs(angle) > 20 && Math.abs(angle) < 160) { // Ignore horizontal lines
+                if (slope < -0.5) { // Left line
+                    leftSlopes.add(slope);
+                    leftIntercepts.add(intercept);
+                    Imgproc.line(matRoi, new Point(x1, y1), new Point(x2, y2), new Scalar(255, 0, 0), 2); // Blue
+                } else if (slope > 0.5) { // Right line
+                    rightSlopes.add(slope);
+                    rightIntercepts.add(intercept);
+                    Imgproc.line(matRoi, new Point(x1, y1), new Point(x2, y2), new Scalar(0, 0, 255), 2); // Red
+                }
             }
         }
-        // --- ADD LOGGING HERE ---
-        Log.d(TAG, "Number of contours found: " + contours.size() + ", Max Area: " + maxArea);
-        // ------------------------
 
-        Control controlSignal = new Control(0, 0);
-        Bitmap displayBitmap = image; // Default to showing original image if no line found
+        // 6. Calculate Average Lines and Find Lane Center
+        float error = 0;
+        float turn = 0;
+        int roiCenterX = matRoi.cols() / 2;
+        int horizonY = matRoi.rows() / 2; // "Look-ahead" point
 
-        // 5 & 6. Calculate Centroid and Steering Logic
-        if (maxAreaIdx != -1 && maxArea > 10) { // Add a minimum area threshold (e.g., 10 pixels)
-            Moments moments = Imgproc.moments(contours.get(maxAreaIdx));
-            // --- REMOVE THE m00 CHECK FOR NOW to match original behavior closer ---
-            // Calculate centroid coordinates
-            Point centroid = new Point();
-            centroid.x = moments.get_m10() / moments.get_m00(); // Might produce NaN/Infinity if m00 is 0
-            centroid.y = moments.get_m01() / moments.get_m00(); // Might produce NaN/Infinity if m00 is 0
+        double leftX = 0;
+        if (!leftSlopes.isEmpty()) {
+            double avgLeftSlope = average(leftSlopes);
+            double avgLeftIntercept = average(leftIntercepts);
+            leftX = (horizonY - avgLeftIntercept) / avgLeftSlope;
+            Imgproc.line(matRoi, new Point(leftX, horizonY), new Point(leftX, matRoi.rows()), new Scalar(255, 255, 0), 3); // Cyan
+        }
 
-            // Check if centroid calculation was valid (not NaN or Infinity)
-            if (!Double.isNaN(centroid.x) && !Double.isInfinite(centroid.x)) {
-                int frameCenterX = matFrame.cols() / 2; // Use original frame width for center calc
-                double error = centroid.x - frameCenterX;
-                float turn = (float) (error * (TURN_SPEED / frameCenterX));
-                controlSignal = new Control(FORWARD_SPEED + turn, FORWARD_SPEED - turn);
+        double rightX = matRoi.cols();
+        if (!rightSlopes.isEmpty()) {
+            double avgRightSlope = average(rightSlopes);
+            double avgRightIntercept = average(rightIntercepts);
+            rightX = (horizonY - avgRightIntercept) / avgRightSlope;
+            Imgproc.line(matRoi, new Point(rightX, horizonY), new Point(rightX, matRoi.rows()), new Scalar(255, 0, 255), 3); // Magenta
+        }
 
-                Log.d(TAG, String.format(Locale.US,"Line Centroid: (%.1f, %.1f), Error: %.1f, Turn: %.2f", centroid.x, centroid.y, error, turn));
-
-                // --- 7. DRAW VISUALIZATION on the original matFrame ---
-                Imgproc.drawContours(matFrame, contours, maxAreaIdx, new Scalar(0, 255, 0), 3); // Green contour
-                Imgproc.circle(matFrame, centroid, 10, new Scalar(255, 0, 0), -1);           // Red centroid dot
-                Imgproc.line(matFrame, new Point(frameCenterX, 0), new Point(frameCenterX, matFrame.rows()), new Scalar(0, 0, 255), 2); // Blue center line
-
-                // Convert the matFrame (with drawings) back to Bitmap
-                displayBitmap = Bitmap.createBitmap(matFrame.cols(), matFrame.rows(), Bitmap.Config.ARGB_8888);
-                Utils.matToBitmap(matFrame, displayBitmap);
-                // ----------------------------------------------------
-            } else {
-                Log.w(TAG, "Centroid calculation resulted in NaN/Infinity. m00 might be zero.");
-                controlSignal = new Control(0, 0); // Stop if calculation invalid
+        // 7. Calculate Control Signal
+        if (!leftSlopes.isEmpty() || !rightSlopes.isEmpty()) {
+            // If we only see one line, just try to stay a fixed distance from it
+            if (leftSlopes.isEmpty()) {
+                leftX = rightX - (matRoi.cols() * 0.8); // Estimate left line position
+            } else if (rightSlopes.isEmpty()) {
+                rightX = leftX + (matRoi.cols() * 0.8); // Estimate right line position
             }
+
+            double laneCenterX = (leftX + rightX) / 2;
+            error = (float) (laneCenterX - roiCenterX);
+            turn = Kp * (error / roiCenterX); // Normalize error
+
+            // Draw the center point and error
+            Imgproc.circle(matRoi, new Point(laneCenterX, horizonY), 5, new Scalar(0, 255, 0), -1); // Green
+            Imgproc.line(matRoi, new Point(roiCenterX, horizonY), new Point(laneCenterX, horizonY), new Scalar(0, 255, 255), 2); // Yellow Error Line
+
+            Log.d(TAG, String.format(Locale.US, "Error: %.2f, Turn: %.2f", error, turn));
+            vehicle.setControl(new Control(FORWARD_SPEED + turn, FORWARD_SPEED - turn));
+
         } else {
-            Log.d(TAG, "No significant line contour detected.");
-            controlSignal = new Control(0, 0);
+            // No lines detected, stop
+            Log.d(TAG, "No lines detected.");
+            vehicle.setControl(new Control(0, 0));
         }
-
-        vehicle.setControl(controlSignal);
 
         // === UPDATE IMAGEVIEW ===
-        final Bitmap finalDisplayBitmap = displayBitmap; // Use final variable for lambda
+        // Copy the processed ROI back onto the main frame for display
+        matRoi.copyTo(new Mat(matFrame, roiRect));
+
+        final Bitmap finalDisplayBitmap = Bitmap.createBitmap(matFrame.cols(), matFrame.rows(), Bitmap.Config.ARGB_8888);
+        Utils.matToBitmap(matFrame, finalDisplayBitmap);
+
         if (getActivity() != null) {
             getActivity().runOnUiThread(() -> {
                 if (processedImageView != null) {
@@ -165,29 +192,39 @@ public class LineTrackingFragment extends CameraFragment {
                 }
             });
         }
-        // Release the cloned Mat if you used one earlier
-        processingMat.release();
+    }
+
+    // Helper function to average a list of doubles
+    private double average(List<Double> list) {
+        if (list.isEmpty()) return 0;
+        double sum = 0;
+        for (double d : list) {
+            sum += d;
+        }
+        return sum / list.size();
     }
 
     @Override
     public void onDestroyView() {
         super.onDestroyView();
-        // Release Mats to free memory
+        // Release Mats
         if (matFrame != null) matFrame.release();
-        if (matHsv != null) matHsv.release();
-        if (matMask != null) matMask.release();
-        if (matHierarchy != null) matHierarchy.release();
+        if (matGray != null) matGray.release();
+        if (matCanny != null) matCanny.release();
+        if (matRoi != null) matRoi.release();
+        if (matHoughLines != null) matHoughLines.release();
+
         binding = null; // Release binding
     }
 
 
     @Override
     protected void processControllerKeyData(String command) {
-        // Not used in this basic implementation
+        // Not used
     }
 
     @Override
     protected void processUSBData(String data) {
-        // Could update RPM display if you add it to the layout
+        // Not used
     }
 }
