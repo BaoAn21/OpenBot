@@ -85,9 +85,15 @@ dependencies {
     implementation 'com.google.android.material:material:1.4.0'
 
     // Build off of stable TensorFlow Lite
-    implementation 'org.tensorflow:tensorflow-lite:2.4.0'
-    implementation 'org.tensorflow:tensorflow-lite-gpu:2.4.0'
-    implementation 'org.tensorflow:tensorflow-lite-support:0.4.4'
+//    implementation 'org.tensorflow:tensorflow-lite:2.4.0'
+//    implementation 'org.tensorflow:tensorflow-lite-gpu:2.4.0'
+//    implementation 'org.tensorflow:tensorflow-lite-support:0.4.4'
+    implementation 'com.google.ai.edge.litert:litert:1.4.0'
+    implementation 'com.google.ai.edge.litert:litert-gpu:1.4.0'
+    implementation 'com.google.ai.edge.litert:litert-support:1.4.0'
+    implementation 'com.google.ai.edge.litert:litert-metadata:1.4.0'
+
+    // -----
 
     implementation "com.google.android.gms:play-services-location:$location_version"
     implementation "com.google.android.gms:play-services-nearby:$nearby_version"
