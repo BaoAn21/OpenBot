@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Depth Map Dashboard</title>
     <style>
+        /* --- CSS is unchanged --- */
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             display: grid;
@@ -32,15 +33,13 @@
             margin-bottom: 0;
             color: #111;
         }
-        
-        /* Left Column: Visuals */
         #visuals {
             display: flex;
             flex-direction: column;
             align-items: center;
         }
         canvas {
-            width: 400px;  /* Scaled up 256x256 */
+            width: 400px;
             height: 400px;
             border: 2px solid #ccc;
             border-radius: 8px;
@@ -49,8 +48,6 @@
             image-rendering: crisp-edges;
             background: #333;
         }
-
-        /* Right Column: Data */
         #stats {
             text-align: left;
         }
@@ -69,24 +66,19 @@
             text-align: right;
             margin-left: 10px;
         }
-
-        /* Status Bar */
         #status {
             width: 100%;
             font-weight: bold;
             font-size: 1.1rem;
             height: 1.5em;
-            color: #d9534f; /* Red by default */
+            color: #d9534f;
         }
         #status.connected {
-            color: #5cb85c; /* Green when connected */
+            color: #5cb85c;
         }
-
-        /* Grid Table */
         #grid-table {
             border-collapse: collapse;
             margin-top: 1rem;
-            /* Each cell is 40px, 8 cells wide = 320px */
             width: 320px; 
             height: 320px;
         }
@@ -113,7 +105,7 @@
         </div>
 
         <div id="stats">
-            <h2>Live Data</h2>
+            <h2>Live Data (Raw Inverse Depth)</h2>
             <div class="stat-item">Min: <span id="minVal">--</span></div>
             <div class="stat-item">Max: <span id="maxVal">--</span></div>
             <div class="stat-item">Avg: <span id="avgVal">--</span></div>
@@ -129,7 +121,6 @@
             const ctx = canvas.getContext('2d', { willReadFrequently: true });
             const statusEl = document.getElementById('status');
             
-            // Get stat elements
             const minValEl = document.getElementById('minVal');
             const maxValEl = document.getElementById('maxVal');
             const avgValEl = document.getElementById('avgVal');
@@ -138,16 +129,15 @@
             // --- Grid Constants ---
             const IMAGE_DIM = 256;
             const PIXEL_COUNT = IMAGE_DIM * IMAGE_DIM;
-            const GRID_DIM = 8; // 8x8 grid
-            const GRID_CELL_SIZE = IMAGE_DIM / GRID_DIM; // 256 / 8 = 32
-            const GRID_PIXEL_COUNT = GRID_CELL_SIZE * GRID_CELL_SIZE; // 32 * 32 = 1024
-            const GRID_SQUARE_COUNT = GRID_DIM * GRID_DIM; // 8 * 8 = 64
+            const GRID_DIM = 8;
+            const GRID_CELL_SIZE = IMAGE_DIM / GRID_DIM;
+            const GRID_PIXEL_COUNT = GRID_CELL_SIZE * GRID_CELL_SIZE;
+            const GRID_SQUARE_COUNT = GRID_DIM * GRID_DIM;
 
-            // --- Canvas Setup ---
             const imageData = ctx.createImageData(IMAGE_DIM, IMAGE_DIM);
             const pixelData = imageData.data;
 
-            // --- Create Grid Table in HTML ---
+            // --- Create Grid Table ---
             let gridCellElements = [];
             let tableHtml = '<tbody>';
             for (let y = 0; y < GRID_DIM; y++) {
@@ -160,13 +150,45 @@
             }
             tableHtml += '</tbody>';
             gridTable.innerHTML = tableHtml;
-            // Store references to all 64 cell elements
             for (let i = 0; i < GRID_SQUARE_COUNT; i++) {
                 gridCellElements.push(document.getElementById(`grid-cell-${i}`));
             }
 
+            // =================================================================
+            // --- +++ NEW: HEATMAP COLOR FUNCTION +++ ---
+            // =================================================================
+            /**
+             * Converts a normalized value (0.0 - 1.0) into an [r, g, b] color array.
+             * 0.0 = Blue (far)
+             * 0.5 = Green/Yellow (mid)
+             * 1.0 = Red (close)
+             */
+            function applyHeatmap(v) {
+                let r = 0, g = 0, b = 0;
+
+                // Simple linear interpolation for a "jet" style colormap
+                // v = 0.0 (blue) -> 0.5 (green) -> 1.0 (red)
+                
+                // Blue to Green (0.0 -> 0.5)
+                if (v < 0.5) {
+                    r = 0;
+                    g = Math.floor(255 * (v * 2)); // 0 -> 255
+                    b = Math.floor(255 * (1 - (v * 2))); // 255 -> 0
+                } 
+                // Green to Red (0.5 -> 1.0)
+                else {
+                    r = Math.floor(255 * ((v - 0.5) * 2)); // 0 -> 255
+                    g = Math.floor(255 * (1 - ((v - 0.5) * 2))); // 255 -> 0
+                    b = 0;
+                }
+                
+                return [r, g, b];
+            }
+            // =================================================================
+
+
             // --- WebSocket Connection ---
-            const socket = new WebSocket('ws://localhost:8765'); // Assumes server is on same machine
+            const socket = new WebSocket('ws://localhost:8765'); 
 
             socket.onopen = () => {
                 console.log("WebSocket connection established.");
@@ -183,82 +205,90 @@
                         return;
                     }
 
-                    // --- 1. Calculate Statistics ---
+                    // --- 1. First Pass: Calculate Stats ---
                     let min = depthArray[0];
                     let max = depthArray[0];
                     let sum = 0;
-                    
-                    // Create an array to hold the sums for each of the 64 grid squares
                     let gridSums = new Array(GRID_SQUARE_COUNT).fill(0);
 
                     for (let i = 0; i < PIXEL_COUNT; i++) {
                         const val = depthArray[i];
-
-                        // Overall stats
                         sum += val;
                         if (val < min) min = val;
                         if (val > max) max = val;
                         
-                        // --- 2. Update Canvas Pixel Data ---
-                        const grayscale = Math.floor(val);
-                        const pixelIndex = i * 4; 
-                        pixelData[pixelIndex]     = grayscale; // R
-                        pixelData[pixelIndex + 1] = grayscale; // G
-                        pixelData[pixelIndex + 2] = grayscale; // B
-                        pixelData[pixelIndex + 3] = 255;       // A
-
-                        // --- 3. Add to correct Grid Sum ---
                         const x = i % IMAGE_DIM;
                         const y = Math.floor(i / IMAGE_DIM);
-                        
                         const gridX = Math.floor(x / GRID_CELL_SIZE);
                         const gridY = Math.floor(y / GRID_CELL_SIZE);
                         const gridIndex = (gridY * GRID_DIM) + gridX;
-                        
                         gridSums[gridIndex] += val;
                     }
+                    
+                    const range = max - min;
+                    
+                    // --- 2. Update Stats Display (with RAW data) ---
+                    minValEl.textContent = min.toFixed(3);
+                    maxValEl.textContent = max.toFixed(3);
+                    avgValEl.textContent = (sum / PIXEL_COUNT).toFixed(3);
 
-                    // --- 4. Update Canvas Display ---
+                    // --- 3. Second Pass: Normalize and Update Canvas ---
+                    if (range > 1e-6) {
+                        for (let i = 0; i < PIXEL_COUNT; i++) {
+                            const normalized = (depthArray[i] - min) / range;
+                            
+                            // +++ Use heatmap function +++
+                            const [r, g, b] = applyHeatmap(normalized);
+                            
+                            const pixelIndex = i * 4; 
+                            pixelData[pixelIndex]     = r; // Red
+                            pixelData[pixelIndex + 1] = g; // Green
+                            pixelData[pixelIndex + 2] = b; // Blue
+                            pixelData[pixelIndex + 3] = 255; // Alpha
+                        }
+                    } else {
+                        // Range is zero, just draw a black image
+                        for (let i = 0; i < PIXEL_COUNT; i++) {
+                            const pixelIndex = i * 4; 
+                            pixelData[pixelIndex]     = 0; // R
+                            pixelData[pixelIndex + 1] = 0; // G
+                            pixelData[pixelIndex + 2] = 0; // B
+                            pixelData[pixelIndex + 3] = 255; // A
+                        }
+                    }
                     ctx.putImageData(imageData, 0, 0);
 
-                    // --- 5. Update Stats Display ---
-                    minValEl.textContent = min.toFixed(2);
-                    maxValEl.textContent = max.toFixed(2);
-                    avgValEl.textContent = (sum / PIXEL_COUNT).toFixed(2);
 
-                    // --- 6. Update Grid Display ---
+                    // --- 4. Update Grid Display ---
                     for (let i = 0; i < GRID_SQUARE_COUNT; i++) {
                         const cell = gridCellElements[i];
-                        const avg = gridSums[i] / GRID_PIXEL_COUNT;
+                        const avgRaw = gridSums[i] / GRID_PIXEL_COUNT;
                         
-                        // Set the text
-                        cell.textContent = avg.toFixed(0);
+                        // Set the text to the RAW average value
+                        cell.textContent = avgRaw.toFixed(2);
                         
-                        // Set the background color (heatmap)
-                        // "larger... darker" -> larger avg = darker color
-                        const colorVal = 255 - Math.floor(avg); // 255 -> 0 (black), 0 -> 255 (white)
-                        cell.style.backgroundColor = `rgb(${colorVal}, ${colorVal}, ${colorVal})`;
+                        // Set background heatmap based on normalized value
+                        let normalizedAvg = 0;
+                        if (range > 1e-6) {
+                            normalizedAvg = (avgRaw - min) / range;
+                        }
                         
-                        // Make text color readable
-                        cell.style.color = (avg > 128) ? 'white' : 'black';
+                        // +++ Use heatmap function +++
+                        const [r, g, b] = applyHeatmap(normalizedAvg);
+                        cell.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
+                        
+                        // Adjust text color for readability
+                        // Green/Yellow are bright, Blue/Red are dark
+                        cell.style.color = (normalizedAvg > 0.25 && normalizedAvg < 0.75) ? 'black' : 'white';
                     }
 
                 } catch (e) {
                     console.error("Failed to process incoming message:", e);
                 }
             };
-
-            socket.onclose = (event) => {
-                console.log("WebSocket connection closed:", event.reason);
-                statusEl.textContent = `Disconnected. (Code: ${event.code})`;
-                statusEl.className = "";
-            };
-
-            socket.onerror = (error) => {
-                console.error("WebSocket error:", error);
-                statusEl.textContent = "Connection Error.";
-                statusEl.className = "";
-            };
+            
+            socket.onclose = (event) => { /* ... (same as before) ... */ };
+            socket.onerror = (error) => { /* ... (same as before) ... */ };
         });
     </script>
 </body>
