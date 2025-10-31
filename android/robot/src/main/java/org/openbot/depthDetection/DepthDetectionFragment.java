@@ -25,7 +25,19 @@ public class DepthDetectionFragment extends CameraFragment {
     private static final String TAG = "DepthDetectionFragment";
     private static final int DEPTH_IMAGE_DIM = 256;
     private static final float FORWARD_SPEED = 0.25f;
-    private float closenessThreshold = 100.0f;
+    private float closenessThreshold = 1.5f;
+    private static final int ROI_X_START = 32;  // from pixel 32
+    private static final int ROI_X_END = 224;   // to pixel 224 (width of 192)
+    private static final int ROI_Y_START = 80;  // from pixel 80 (avoids the floor)
+    private static final int ROI_Y_END = 160;   // to pixel 160 (looks ahead)
+
+    // How many pixels must be "too close" to trigger a stop?
+    // Let's start with 200 pixels. You will need to tune this.
+    private static final int PIXEL_COUNT_THRESHOLD = 200;
+
+    // This is the "900" value. It's now the threshold for a single pixel.
+    // Start with a high value. You will tune this with the +/- buttons.
+    private float depthValueThreshold = 900.0f;
     private MidasNetSmall midasNet;
     private FragmentDepthDetectionBinding binding;
     private Enums.SpeedMode currentSpeedMode;
@@ -56,13 +68,13 @@ public class DepthDetectionFragment extends CameraFragment {
         // --- SETUP THRESHOLD BUTTON LISTENERS ---
         binding.plusThresholdButton.setOnClickListener(v -> {
             // Increase threshold, max 255
-            closenessThreshold = Math.min(closenessThreshold + 5.0f, 255.0f);
+            closenessThreshold += 50.0f;
             updateThresholdDisplay();
             // You might want to save the new value to SharedPreferences here
         });
         binding.minusThresholdButton.setOnClickListener(v -> {
             // Decrease threshold, min 0
-            closenessThreshold = Math.max(closenessThreshold - 5.0f, 0.0f);
+            closenessThreshold = Math.max(closenessThreshold - 50.0f, 0.0f);
             updateThresholdDisplay();
             // You might want to save the new value to SharedPreferences here
         });
@@ -85,6 +97,9 @@ public class DepthDetectionFragment extends CameraFragment {
             midasNet = new MidasNetSmall(requireActivity(), MapType.DEPTHVIEW_GRAYSCALE, ModelType.FLOAT);
             Log.d(TAG, "MiDAS model initialized successfully.");
             isProcessingFrame.set(true);
+            if (binding != null) {
+                binding.modelTypeTextview.setText(currentModelType.toString());
+            }
         } catch (IOException e) {
             Log.e(TAG, "Failed to initialize MiDAS model", e);
         }
@@ -244,58 +259,92 @@ public class DepthDetectionFragment extends CameraFragment {
         }
     }
     // ----------------------------
-
+    /**
+     * Analyzes the depth data by counting pixels in a specific "look-ahead" region
+     * that are over a certain inverse-depth threshold.
+     */
     private boolean analyzeDepthData(float[] depthValues) {
-        int zoneSize = 20;
-        int startX = (DEPTH_IMAGE_DIM / 2) - (zoneSize / 2);
-        int startY = (DEPTH_IMAGE_DIM / 2) - (zoneSize / 2);
-        float sumOfValues = 0;
-        int pixelCount = 0;
-        for (int y = startY; y < startY + zoneSize; y++) {
-            for (int x = startX; x < startX + zoneSize; x++) {
+        if (depthValues == null || depthValues.length != DEPTH_IMAGE_DIM * DEPTH_IMAGE_DIM) {
+            Log.w(TAG, "analyzeDepthData: depthValues array is null or has unexpected size!");
+            return false; // Cannot analyze if data is invalid
+        }
+
+        int dangerPixelCount = 0;
+
+        // Loop *only* through our "look-ahead" Region of Interest (ROI)
+        for (int y = ROI_Y_START; y < ROI_Y_END; y++) {
+            for (int x = ROI_X_START; x < ROI_X_END; x++) {
+
                 int index = y * DEPTH_IMAGE_DIM + x;
-                sumOfValues += depthValues[index];
-                pixelCount++;
+
+                // Check if this single pixel's value is over our "danger" threshold
+                if (depthValues[index] > depthValueThreshold) {
+                    dangerPixelCount++;
+                }
             }
         }
-        float averageDistanceValue = sumOfValues / pixelCount;
-        boolean isClose = averageDistanceValue > closenessThreshold;
+
+        // Check if the *number* of danger pixels is large enough to be an obstacle
+        boolean isClose = dangerPixelCount > PIXEL_COUNT_THRESHOLD;
+
         if (isClose) {
-            Log.d(TAG, "DANGER: Object is very close! Average value: " + averageDistanceValue);
+            Log.d(TAG, "DANGER: Obstacle detected! " + dangerPixelCount + " pixels over threshold " + depthValueThreshold);
         }
+
         return isClose;
-        // ----------------------------------------------------------
-//        if (depthValues == null || depthValues.length == 0) {
-//            Log.w(TAG, "analyzeDepthData: depthValues array is null or empty!");
-//            return false; // Cannot analyze if there's no data
-//        }
-//
-//        float sumOfValues = 0;
-//        int pixelCount = depthValues.length; // Total number of pixels
-//
-//        // Iterate through ALL depth values
-//        for (float value : depthValues) {
-//            sumOfValues += value;
-//        }
-//
-//        // Calculate the average depth value for the entire frame
-//        float averageDistanceValue = sumOfValues / pixelCount;
-//
-//        // Check if the overall average depth indicates closeness
-//        boolean isClose = averageDistanceValue > closenessThreshold;
-//
-//        if (isClose) {
-//            Log.d(TAG, String.format(Locale.US,
-//                    "DANGER: Average depth (%.2f) exceeds threshold (%.2f). Object potentially close.",
-//                    averageDistanceValue, closenessThreshold));
-//        } else {
-//            Log.d(TAG, String.format(Locale.US,
-//                    "INFO: Average depth (%.2f) is below threshold (%.2f). Path appears clear.",
-//                    averageDistanceValue, closenessThreshold));
-//        }
-//
-//        return isClose;
     }
+
+//    private boolean analyzeDepthData(float[] depthValues) {
+//        int zoneSize = 20;
+//        int startX = (DEPTH_IMAGE_DIM / 2) - (zoneSize / 2);
+//        int startY = (DEPTH_IMAGE_DIM / 2) - (zoneSize / 2);
+//        float sumOfValues = 0;
+//        int pixelCount = 0;
+//        for (int y = startY; y < startY + zoneSize; y++) {
+//            for (int x = startX; x < startX + zoneSize; x++) {
+//                int index = y * DEPTH_IMAGE_DIM + x;
+//                sumOfValues += depthValues[index];
+//                pixelCount++;
+//            }
+//        }
+//        float averageDistanceValue = sumOfValues / pixelCount;
+//        boolean isClose = averageDistanceValue > closenessThreshold;
+//        if (isClose) {
+//            Log.d(TAG, "DANGER: Object is very close! Average value: " + averageDistanceValue);
+//        }
+//        return isClose;
+//        // ----------------------------------------------------------
+////        if (depthValues == null || depthValues.length == 0) {
+////            Log.w(TAG, "analyzeDepthData: depthValues array is null or empty!");
+////            return false; // Cannot analyze if there's no data
+////        }
+////
+////        float sumOfValues = 0;
+////        int pixelCount = depthValues.length; // Total number of pixels
+////
+////        // Iterate through ALL depth values
+////        for (float value : depthValues) {
+////            sumOfValues += value;
+////        }
+////
+////        // Calculate the average depth value for the entire frame
+////        float averageDistanceValue = sumOfValues / pixelCount;
+////
+////        // Check if the overall average depth indicates closeness
+////        boolean isClose = averageDistanceValue > closenessThreshold;
+////
+////        if (isClose) {
+////            Log.d(TAG, String.format(Locale.US,
+////                    "DANGER: Average depth (%.2f) exceeds threshold (%.2f). Object potentially close.",
+////                    averageDistanceValue, closenessThreshold));
+////        } else {
+////            Log.d(TAG, String.format(Locale.US,
+////                    "INFO: Average depth (%.2f) is below threshold (%.2f). Path appears clear.",
+////                    averageDistanceValue, closenessThreshold));
+////        }
+////
+////        return isClose;
+//    }
 
     private void debugLogCenterValues(float[] depthValues) {
         int zoneSize = 10;
