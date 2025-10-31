@@ -25,12 +25,12 @@ public class DepthDetectionFragment extends CameraFragment {
     private static final String TAG = "DepthDetectionFragment";
     private static final int DEPTH_IMAGE_DIM = 256;
     private static final float FORWARD_SPEED = 0.25f;
-//    private static final float CLOSENESS_THRESHOLD = 100.0f;
     private float closenessThreshold = 100.0f;
     private MidasNetSmall midasNet;
     private FragmentDepthDetectionBinding binding;
     private Enums.SpeedMode currentSpeedMode;
     private boolean isAutopilotActive = true;
+    private Bitmap lastDepthBitmap = null;
 
     private final AtomicBoolean isProcessingFrame = new AtomicBoolean(false);
 
@@ -49,6 +49,9 @@ public class DepthDetectionFragment extends CameraFragment {
         updateThresholdDisplay(); // Update the TextView with the initial value
         // ----------------------------------------------------
         updateAutopilotStatusUI();
+
+        NetworkUtils.initializeWebSocket(); // Initialize (safe to call multiple times)
+        NetworkUtils.connectWebSocket();
 
         // --- SETUP THRESHOLD BUTTON LISTENERS ---
         binding.plusThresholdButton.setOnClickListener(v -> {
@@ -93,6 +96,7 @@ public class DepthDetectionFragment extends CameraFragment {
         // Capture the current midasNet instance *after* checking the flag.
         long inferenceTime = 0;
         String currentStatus = "MANUAL";
+        Bitmap depthBitmapToShow = null;
         if (isAutopilotActive) {
         MidasNetSmall currentMidasNet = this.midasNet;
 
@@ -101,7 +105,7 @@ public class DepthDetectionFragment extends CameraFragment {
             if (imageProxy != null) {
                 imageProxy.close();
             }
-            return; // Exit immediately if processing stopped or model is null
+            return;
         }
         // ---------------------------------------------
 
@@ -113,14 +117,20 @@ public class DepthDetectionFragment extends CameraFragment {
                 image.getWidth(), image.getHeight(),
                 matrix, true
         );
-
-
-
         // Use the local reference
         float[] depthValues = currentMidasNet.getDepthMapFloatArray(rotatedFrame);
         // Send debug data
-//        NetworkUtils.sendDepthData(depthValues);
+            // --- Send depth data via WebSocket ---
+            if (depthValues != null) {
+                NetworkUtils.sendDepthData(depthValues); // Send the data
+            }
+            // -------------------------------------
         inferenceTime = currentMidasNet.getLastInferenceTimeMs();
+            // +++ Generate the grayscale bitmap +++
+            if (depthValues != null && depthValues.length > 0) {
+                depthBitmapToShow = ImageUtils.toGrayscaleBitmap(depthValues, DEPTH_IMAGE_DIM);
+            }
+            // ++++++++++++++++++++++++++++++++++++
 
         Log.i(TAG, "Inference Time: " + inferenceTime + " ms");
 //        debugLogCenterValues(depthValues);
@@ -147,6 +157,7 @@ public class DepthDetectionFragment extends CameraFragment {
         // Update UI
         final String statusToDisplay = currentStatus;
         final long timeToDisplay = inferenceTime;
+        final Bitmap finalDepthBitmap = depthBitmapToShow; // Use final variable for lambda
         if (getActivity() != null) {
             getActivity().runOnUiThread(() -> {
                 if (binding != null) {
@@ -154,10 +165,26 @@ public class DepthDetectionFragment extends CameraFragment {
                             String.format(Locale.US, "Inference: %d ms", timeToDisplay)
                     );
                     binding.statusTextview.setText("Status: " + statusToDisplay);
+                    // +++ Update the ImageView +++
+                    if (finalDepthBitmap != null) {
+                        binding.depthImageView.setImageBitmap(finalDepthBitmap);
+                        // Store the bitmap if needed for later recycling
+                        recycleLastBitmap(); // Recycle the previous one
+                        lastDepthBitmap = finalDepthBitmap;
+                    }
+                    // +++++++++++++++++++++++++++
                 }
             });
         }
     }
+    // +++ Add method to recycle bitmap +++
+    private void recycleLastBitmap() {
+        if (lastDepthBitmap != null && !lastDepthBitmap.isRecycled()) {
+            lastDepthBitmap.recycle();
+            lastDepthBitmap = null;
+        }
+    }
+    // ++++++++++++++++++++++++++++++++++++
 
     // --- ADD HELPER TO UPDATE AUTOPILOT UI ---
     private void updateAutopilotStatusUI() {
