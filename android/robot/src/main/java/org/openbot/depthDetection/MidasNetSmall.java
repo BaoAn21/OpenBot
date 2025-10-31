@@ -91,21 +91,23 @@ public class MidasNetSmall {
                     new int[]{1, INPUT_IMAGE_DIM, INPUT_IMAGE_DIM, 1}, DataType.FLOAT32
             );
             interpreter.run(inputTensor.getBuffer(), outputTensor.getBuffer());
-            lastInferenceTimeMs = SystemClock.uptimeMillis() - startTime;
             outputTensor = outputTensorProcessor.process(outputTensor);
+            lastInferenceTimeMs = SystemClock.uptimeMillis() - startTime;
+
             return outputTensor.getFloatArray();
         } else {
             TensorBuffer outputTensor = TensorBuffer.createFixedSize(
                     new int[]{1, INPUT_IMAGE_DIM, INPUT_IMAGE_DIM, 1}, DataType.UINT8
             );
             interpreter.run(inputTensor.getBuffer(), outputTensor.getBuffer());
-            lastInferenceTimeMs = SystemClock.uptimeMillis() - startTime;
             ByteBuffer outputBuffer = outputTensor.getBuffer();
             outputBuffer.rewind();
             float[] floatArray = new float[outputBuffer.remaining()];
             for (int i = 0; i < floatArray.length; i++) {
                 floatArray[i] = (float) (outputBuffer.get() & 0xFF);
             }
+            lastInferenceTimeMs = SystemClock.uptimeMillis() - startTime;
+
             return floatArray;
         }
     }
