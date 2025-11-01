@@ -1,14 +1,179 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     tools:context=".lineTracking.LineTrackingFragment">
+
     <ImageView
-        android:id="@+id/processed_image_view"
+        android:id="@+id/processedImageView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:scaleType="fitCenter" />
 
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/aiBottomSheet"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bottom_sheet_bg"
+        app:behavior_hideable="false"
+        app:behavior_peekHeight="320dp"
+        app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior">
 
-</FrameLayout>
+        <View
+            android:id="@+id/view"
+            android:layout_width="48dp"
+            android:layout_height="5dp"
+            android:layout_marginTop="16dp"
+            android:alpha="0.5"
+            android:background="@drawable/button_item_background_black"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <ImageView
+            android:id="@+id/cameraToggleButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginEnd="16dp"
+            android:background="@drawable/button_item_background_black"
+            android:padding="8dp"
+            android:src="@drawable/ic_cameraswitch"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/view" />
+
+        <TextView
+            android:id="@+id/inferenceTimeTextview"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:layout_marginTop="16dp"
+            android:text="Inference: --- ms"
+            android:textSize="16sp"
+            android:textColor="@android:color/black"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/cameraToggleButton" />
+
+        <LinearLayout
+            android:id="@+id/thresholdModeLayout"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center_vertical"
+            app:layout_constraintStart_toStartOf="@id/inferenceTimeTextview"
+            app:layout_constraintTop_toBottomOf="@id/inferenceTimeTextview"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintEnd_toStartOf="@id/cameraToggleButton"
+            android:layout_marginEnd="16dp">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Mode:"
+                android:textSize="16sp"
+                android:textColor="@android:color/black" />
+            <TextView
+                android:id="@+id/thresholdModeTextview"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="Dark Object (INV)"
+                android:textSize="16sp"
+                android:textColor="@android:color/black"
+                android:textStyle="bold" />
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/thresholdModeSwitch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:text="Bright Obj" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/thresholdControlLayout"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center_vertical"
+            app:layout_constraintStart_toStartOf="@id/thresholdModeLayout"
+            app:layout_constraintTop_toBottomOf="@id/thresholdModeLayout"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintEnd_toStartOf="@id/cameraToggleButton"
+            android:layout_marginEnd="16dp">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Threshold:"
+                android:textSize="16sp"
+                android:textColor="@android:color/black" />
+            <ImageView
+                android:id="@+id/minusThresholdButton"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="16dp"
+                android:background="@drawable/spinner_bg"
+                android:contentDescription="@string/minus"
+                android:src="@drawable/ic_baseline_remove" />
+            <TextView
+                android:id="@+id/thresholdValueTextview"
+                android:layout_width="60dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:gravity="center"
+                android:text="127"
+                android:textColor="@android:color/black"
+                android:textSize="16sp" />
+            <ImageView
+                android:id="@+id/plusThresholdButton"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/spinner_bg"
+                android:contentDescription="@string/plus"
+                android:src="@drawable/ic_baseline_add" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/statusTextview"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Status: STOPPED"
+            android:textSize="16sp"
+            android:textColor="@android:color/black"
+            android:textStyle="bold"
+            app:layout_constraintStart_toStartOf="@id/thresholdControlLayout"
+            app:layout_constraintTop_toBottomOf="@id/thresholdControlLayout" />
+
+        <TextView
+            android:id="@+id/autopilotToggleButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Autopilot: OFF (Tap to start)"
+            android:textSize="16sp"
+            android:textColor="@android:color/holo_red_dark"
+            android:textStyle="bold"
+            android:padding="8dp"
+            android:background="@drawable/button_item_background_black"
+            app:layout_constraintStart_toStartOf="@id/statusTextview"
+            app:layout_constraintTop_toBottomOf="@id/statusTextview" />
+
+        <ImageView
+            android:id="@+id/debugBlobView"
+            android:layout_width="150dp"
+            android:layout_height="150dp"
+            android:layout_marginTop="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginBottom="16dp"
+            android:background="@android:color/darker_gray"
+            android:scaleType="fitCenter"
+            android:contentDescription="Debug blob visualization"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/statusTextview"
+            app:layout_constraintBottom_toBottomOf="parent" />
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>
