@@ -46,7 +46,7 @@ public class DepthDetectionFragment extends CameraFragment {
 
     private final AtomicBoolean isProcessingFrame = new AtomicBoolean(false);
 
-    private ModelType currentModelType = ModelType.QUANTIZED; // Default to FLOAT model
+    private ModelType currentModelType = ModelType.FLOAT; // Default to FLOAT model
 
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {

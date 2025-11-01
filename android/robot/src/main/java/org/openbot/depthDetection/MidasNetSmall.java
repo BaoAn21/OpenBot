@@ -36,7 +36,7 @@ public class MidasNetSmall {
     private final ModelType modelType;
     private Interpreter interpreter;
     private final ImageProcessor inputTensorProcessor;
-//    private final TensorProcessor outputTensorProcessor;
+    private final TensorProcessor outputTensorProcessor;
     private final MapType mapType;
     private long lastInferenceTimeMs = 0;
 
@@ -55,10 +55,10 @@ public class MidasNetSmall {
         if (modelType == ModelType.FLOAT) {
             modelName = MODEL_FLOAT_NAME;
             inputBuilder.add(new NormalizeOp(NORM_MEAN, NORM_STD));
-//            outputTensorProcessor = new TensorProcessor.Builder().add(new DepthScalingOp()).build();
+            outputTensorProcessor = new TensorProcessor.Builder().add(new DepthScalingOp()).build();
         } else {
             modelName = MODEL_QUANTIZED_NAME;
-//            outputTensorProcessor = null;
+            outputTensorProcessor = null;
         }
         inputTensorProcessor = inputBuilder.build();
 
@@ -91,7 +91,7 @@ public class MidasNetSmall {
                     new int[]{1, INPUT_IMAGE_DIM, INPUT_IMAGE_DIM, 1}, DataType.FLOAT32
             );
             interpreter.run(inputTensor.getBuffer(), outputTensor.getBuffer());
-//            outputTensor = outputTensorProcessor.process(outputTensor);
+            outputTensor = outputTensorProcessor.process(outputTensor);
             lastInferenceTimeMs = SystemClock.uptimeMillis() - startTime;
 
             return outputTensor.getFloatArray();
