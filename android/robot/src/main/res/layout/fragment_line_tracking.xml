@@ -7,19 +7,22 @@
     android:layout_height="match_parent"
     tools:context=".lineTracking.LineTrackingFragment">
 
+    <!-- This is the main display for the processed camera feed (with contours) -->
     <ImageView
         android:id="@+id/processedImageView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:scaleType="fitCenter" />
 
+    <!-- This is the Bottom Sheet for all AI controls -->
+    <!-- Increased peekHeight to show all new controls -->
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/aiBottomSheet"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="@drawable/bottom_sheet_bg"
         app:behavior_hideable="false"
-        app:behavior_peekHeight="320dp"
+        app:behavior_peekHeight="500dp"
         app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior">
 
         <View
@@ -57,8 +60,9 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@id/cameraToggleButton" />
 
+        <!-- Canny Low Threshold Control -->
         <LinearLayout
-            android:id="@+id/thresholdModeLayout"
+            android:id="@+id/cannyLowControlLayout"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
@@ -66,50 +70,15 @@
             app:layout_constraintStart_toStartOf="@id/inferenceTimeTextview"
             app:layout_constraintTop_toBottomOf="@id/inferenceTimeTextview"
             app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintEnd_toStartOf="@id/cameraToggleButton"
             android:layout_marginEnd="16dp">
             <TextView
-                android:layout_width="wrap_content"
+                android:layout_width="100dp"
                 android:layout_height="wrap_content"
-                android:text="Mode:"
-                android:textSize="16sp"
-                android:textColor="@android:color/black" />
-            <TextView
-                android:id="@+id/thresholdModeTextview"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:text="Dark Object (INV)"
-                android:textSize="16sp"
-                android:textColor="@android:color/black"
-                android:textStyle="bold" />
-            <androidx.appcompat.widget.SwitchCompat
-                android:id="@+id/thresholdModeSwitch"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="16dp"
-                android:text="Bright Obj" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/thresholdControlLayout"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:gravity="center_vertical"
-            app:layout_constraintStart_toStartOf="@id/thresholdModeLayout"
-            app:layout_constraintTop_toBottomOf="@id/thresholdModeLayout"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintEnd_toStartOf="@id/cameraToggleButton"
-            android:layout_marginEnd="16dp">
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Threshold:"
+                android:text="Canny Low:"
                 android:textSize="16sp"
                 android:textColor="@android:color/black" />
             <ImageView
-                android:id="@+id/minusThresholdButton"
+                android:id="@+id/minusCannyLowButton"
                 android:layout_width="32dp"
                 android:layout_height="32dp"
                 android:layout_marginStart="16dp"
@@ -117,16 +86,16 @@
                 android:contentDescription="@string/minus"
                 android:src="@drawable/ic_baseline_remove" />
             <TextView
-                android:id="@+id/thresholdValueTextview"
+                android:id="@+id/cannyLowValueTextview"
                 android:layout_width="60dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:gravity="center"
-                android:text="127"
+                android:text="30"
                 android:textColor="@android:color/black"
                 android:textSize="16sp" />
             <ImageView
-                android:id="@+id/plusThresholdButton"
+                android:id="@+id/plusCannyLowButton"
                 android:layout_width="32dp"
                 android:layout_height="32dp"
                 android:layout_marginStart="8dp"
@@ -134,6 +103,227 @@
                 android:contentDescription="@string/plus"
                 android:src="@drawable/ic_baseline_add" />
         </LinearLayout>
+
+        <!-- Canny High Threshold Control -->
+        <LinearLayout
+            android:id="@+id/cannyHighControlLayout"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center_vertical"
+            app:layout_constraintStart_toStartOf="@id/cannyLowControlLayout"
+            app:layout_constraintTop_toBottomOf="@id/cannyLowControlLayout"
+            app:layout_constraintEnd_toEndOf="parent"
+            android:layout_marginEnd="16dp">
+            <TextView
+                android:layout_width="100dp"
+                android:layout_height="wrap_content"
+                android:text="Canny High:"
+                android:textSize="16sp"
+                android:textColor="@android:color/black" />
+            <ImageView
+                android:id="@+id/minusCannyHighButton"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="16dp"
+                android:background="@drawable/spinner_bg"
+                android:contentDescription="@string/minus"
+                android:src="@drawable/ic_baseline_remove" />
+            <TextView
+                android:id="@+id/cannyHighValueTextview"
+                android:layout_width="60dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:gravity="center"
+                android:text="100"
+                android:textColor="@android:color/black"
+                android:textSize="16sp" />
+            <ImageView
+                android:id="@+id/plusCannyHighButton"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/spinner_bg"
+                android:contentDescription="@string/plus"
+                android:src="@drawable/ic_baseline_add" />
+        </LinearLayout>
+
+        <!-- NEW: Kernel Size Control -->
+        <LinearLayout
+            android:id="@+id/kernelControlLayout"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center_vertical"
+            app:layout_constraintStart_toStartOf="@id/cannyHighControlLayout"
+            app:layout_constraintTop_toBottomOf="@id/cannyHighControlLayout"
+            app:layout_constraintEnd_toEndOf="parent"
+            android:layout_marginEnd="16dp">
+            <TextView
+                android:layout_width="100dp"
+                android:layout_height="wrap_content"
+                android:text="Kernel Size:"
+                android:textSize="16sp"
+                android:textColor="@android:color/black" />
+            <ImageView
+                android:id="@+id/minusKernelButton"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="16dp"
+                android:background="@drawable/spinner_bg"
+                android:contentDescription="@string/minus"
+                android:src="@drawable/ic_baseline_remove" />
+            <TextView
+                android:id="@+id/kernelValueTextview"
+                android:layout_width="60dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:gravity="center"
+                android:text="7"
+                android:textColor="@android:color/black"
+                android:textSize="16sp" />
+            <ImageView
+                android:id="@+id/plusKernelButton"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/spinner_bg"
+                android:contentDescription="@string/plus"
+                android:src="@drawable/ic_baseline_add" />
+        </LinearLayout>
+
+        <!-- NEW: Dilate Iterations Control -->
+        <LinearLayout
+            android:id="@+id/dilateControlLayout"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center_vertical"
+            app:layout_constraintStart_toStartOf="@id/kernelControlLayout"
+            app:layout_constraintTop_toBottomOf="@id/kernelControlLayout"
+            app:layout_constraintEnd_toEndOf="parent"
+            android:layout_marginEnd="16dp">
+            <TextView
+                android:layout_width="100dp"
+                android:layout_height="wrap_content"
+                android:text="Dilate Iter:"
+                android:textSize="16sp"
+                android:textColor="@android:color/black" />
+            <ImageView
+                android:id="@+id/minusDilateButton"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="16dp"
+                android:background="@drawable/spinner_bg"
+                android:contentDescription="@string/minus"
+                android:src="@drawable/ic_baseline_remove" />
+            <TextView
+                android:id="@+id/dilateValueTextview"
+                android:layout_width="60dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:gravity="center"
+                android:text="3"
+                android:textColor="@android:color/black"
+                android:textSize="16sp" />
+            <ImageView
+                android:id="@+id/plusDilateButton"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/spinner_bg"
+                android:contentDescription="@string/plus"
+                android:src="@drawable/ic_baseline_add" />
+        </LinearLayout>
+
+        <!-- NEW: Erode Iterations Control -->
+        <LinearLayout
+            android:id="@+id/erodeControlLayout"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center_vertical"
+            app:layout_constraintStart_toStartOf="@id/dilateControlLayout"
+            app:layout_constraintTop_toBottomOf="@id/dilateControlLayout"
+            app:layout_constraintEnd_toEndOf="parent"
+            android:layout_marginEnd="16dp">
+            <TextView
+                android:layout_width="100dp"
+                android:layout_height="wrap_content"
+                android:text="Erode Iter:"
+                android:textSize="16sp"
+                android:textColor="@android:color/black" />
+            <ImageView
+                android:id="@+id/minusErodeButton"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="16dp"
+                android:background="@drawable/spinner_bg"
+                android:contentDescription="@string/minus"
+                android:src="@drawable/ic_baseline_remove" />
+            <TextView
+                android:id="@+id/erodeValueTextview"
+                android:layout_width="60dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:gravity="center"
+                android:text="2"
+                android:textColor="@android:color/black"
+                android:textSize="16sp" />
+            <ImageView
+                android:id="@+id/plusErodeButton"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/spinner_bg"
+                android:contentDescription="@string/plus"
+                android:src="@drawable/ic_baseline_add" />
+        </LinearLayout>
+
+        <!-- NEW: Min Area Control -->
+        <LinearLayout
+            android:id="@+id/minAreaControlLayout"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center_vertical"
+            app:layout_constraintStart_toStartOf="@id/erodeControlLayout"
+            app:layout_constraintTop_toBottomOf="@id/erodeControlLayout"
+            app:layout_constraintEnd_toEndOf="parent"
+            android:layout_marginEnd="16dp">
+            <TextView
+                android:layout_width="100dp"
+                android:layout_height="wrap_content"
+                android:text="Min Area:"
+                android:textSize="16sp"
+                android:textColor="@android:color/black" />
+            <ImageView
+                android:id="@+id/minusMinAreaButton"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="16dp"
+                android:background="@drawable/spinner_bg"
+                android:contentDescription="@string/minus"
+                android:src="@drawable/ic_baseline_remove" />
+            <TextView
+                android:id="@+id/minAreaValueTextview"
+                android:layout_width="60dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:gravity="center"
+                android:text="1000"
+                android:textColor="@android:color/black"
+                android:textSize="16sp" />
+            <ImageView
+                android:id="@+id/plusMinAreaButton"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/spinner_bg"
+                android:contentDescription="@string/plus"
+                android:src="@drawable/ic_baseline_add" />
+        </LinearLayout>
+
 
         <TextView
             android:id="@+id/statusTextview"
@@ -144,8 +334,8 @@
             android:textSize="16sp"
             android:textColor="@android:color/black"
             android:textStyle="bold"
-            app:layout_constraintStart_toStartOf="@id/thresholdControlLayout"
-            app:layout_constraintTop_toBottomOf="@id/thresholdControlLayout" />
+            app:layout_constraintStart_toStartOf="@id/minAreaControlLayout"
+            app:layout_constraintTop_toBottomOf="@id/minAreaControlLayout" />
 
         <TextView
             android:id="@+id/autopilotToggleButton"
@@ -161,6 +351,7 @@
             app:layout_constraintStart_toStartOf="@id/statusTextview"
             app:layout_constraintTop_toBottomOf="@id/statusTextview" />
 
+        <!-- This will show the Canny + Closed image (the "blob") -->
         <ImageView
             android:id="@+id/debugBlobView"
             android:layout_width="150dp"

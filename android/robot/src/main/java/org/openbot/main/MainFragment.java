@@ -106,7 +106,10 @@ public class MainFragment extends Fragment implements OnItemClickListener<SubCat
         Navigation.findNavController(requireView())
             .navigate(R.id.action_mainFragment_to_modelManagementFragment);
         break;
-
+      case FeatureList.SUBJECT_SEGMENTATION:
+        Navigation.findNavController(requireView())
+                .navigate(R.id.action_mainFragment_to_subjectSegmentation);
+        break;
       case FeatureList.DEFAULT:
         Intent intent = new Intent(requireActivity(), DefaultActivity.class);
         startActivity(intent);

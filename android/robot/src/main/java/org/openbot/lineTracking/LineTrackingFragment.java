@@ -148,6 +148,7 @@ import org.opencv.android.Utils;
 import org.opencv.core.Core;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfPoint;
+import org.opencv.core.Point;
 import org.opencv.core.Scalar;
 import org.opencv.core.Size;
 import org.opencv.imgproc.Imgproc;
@@ -171,24 +172,33 @@ public class LineTrackingFragment extends CameraFragment {
     private Mat matFrame;
     private Mat matGray;
     private Mat matBlur;
-    private Mat matThresh;
+    private Mat matCanny;
+    private Mat matKernel;
+    private Mat matDilated;
+    private Mat matClosed;
     private Mat matHierarchy;
     private Mat matDisplay;
     private List<MatOfPoint> contoursList;
     // -------------------
 
     // --- Tunable Parameters ---
-    private static final double MIN_OBSTACLE_AREA = 2500;
+    // These are the defaults, can be changed from UI
+    private int cannyLow = 30;
+    private int cannyHigh = 100;
+    private int kernelSize = 7;
+    private int dilateIterations = 3;
+    private int erodeIterations = 2;
+    private double minObstacleArea = 50000;
+    // ------------------------
+
+    // --- Driving logic ---
     private static final double STOP_AREA_PERCENT = 0.3; // 30% of the screen
     private static final float BASE_SPEED = 0.4f;
     private static final float TURN_GAIN = 0.6f;
-    private final Size BLUR_STRENGTH = new Size(7, 7);
     // ------------------------
 
     // --- Control State ---
     private boolean isAutopilotOn = false;
-    private int thresholdValue = 127;
-    private int thresholdMode = Imgproc.THRESH_BINARY_INV; // For dark objects on light background
     private long lastProcessingTimeMs;
     // ---------------------
 
@@ -206,7 +216,11 @@ public class LineTrackingFragment extends CameraFragment {
         matFrame = new Mat();
         matGray = new Mat();
         matBlur = new Mat();
-        matThresh = new Mat();
+        matCanny = new Mat();
+        // Create the kernel for the first time
+        matKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(kernelSize, kernelSize));
+        matDilated = new Mat();
+        matClosed = new Mat();
         matHierarchy = new Mat();
         matDisplay = new Mat();
         contoursList = new ArrayList<>();
@@ -229,36 +243,87 @@ public class LineTrackingFragment extends CameraFragment {
             }
         });
 
-        // Threshold Value Controls
-        binding.thresholdValueTextview.setText(String.valueOf(thresholdValue));
-        binding.plusThresholdButton.setOnClickListener(v -> updateThreshold(5));
-        binding.minusThresholdButton.setOnClickListener(v -> updateThreshold(-5));
+        // --- Canny Low Controls ---
+        binding.cannyLowValueTextview.setText(String.valueOf(cannyLow));
+        binding.plusCannyLowButton.setOnClickListener(v -> updateCannyLow(5));
+        binding.minusCannyLowButton.setOnClickListener(v -> updateCannyLow(-5));
 
-        // Threshold Mode Switch (BINARY vs BINARY_INV)
-        binding.thresholdModeSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            if (isChecked) {
-                // For BRIGHT objects on DARK background
-                thresholdMode = Imgproc.THRESH_BINARY;
-                binding.thresholdModeTextview.setText("Bright Object");
-            } else {
-                // For DARK objects on LIGHT background
-                thresholdMode = Imgproc.THRESH_BINARY_INV;
-                binding.thresholdModeTextview.setText("Dark Object (INV)");
-            }
-        });
+        // --- Canny High Controls ---
+        binding.cannyHighValueTextview.setText(String.valueOf(cannyHigh));
+        binding.plusCannyHighButton.setOnClickListener(v -> updateCannyHigh(5));
+        binding.minusCannyHighButton.setOnClickListener(v -> updateCannyHigh(-5));
 
-        Log.i(TAG, "LineTrackingFragment onViewCreated (Threshold Blob Mode)");
+        // --- NEW: Kernel Size Controls ---
+        binding.kernelValueTextview.setText(String.valueOf(kernelSize));
+        binding.plusKernelButton.setOnClickListener(v -> updateKernel(2));
+        binding.minusKernelButton.setOnClickListener(v -> updateKernel(-2));
+
+        // --- NEW: Dilate Iterations Controls ---
+        binding.dilateValueTextview.setText(String.valueOf(dilateIterations));
+        binding.plusDilateButton.setOnClickListener(v -> updateDilate(1));
+        binding.minusDilateButton.setOnClickListener(v -> updateDilate(-1));
+
+        // --- NEW: Erode Iterations Controls ---
+        binding.erodeValueTextview.setText(String.valueOf(erodeIterations));
+        binding.plusErodeButton.setOnClickListener(v -> updateErode(1));
+        binding.minusErodeButton.setOnClickListener(v -> updateErode(-1));
+
+        // --- NEW: Min Area Controls ---
+        binding.minAreaValueTextview.setText(String.valueOf((int)minObstacleArea));
+        binding.plusMinAreaButton.setOnClickListener(v -> updateMinArea(1000));
+        binding.minusMinAreaButton.setOnClickListener(v -> updateMinArea(-1000));
+
+        Log.i(TAG, "LineTrackingFragment onViewCreated (Canny Blob Mode)");
     }
 
-    private void updateThreshold(int delta) {
-        thresholdValue += delta;
-        if (thresholdValue > 255) thresholdValue = 255;
-        if (thresholdValue < 0) thresholdValue = 0;
-        binding.thresholdValueTextview.setText(String.valueOf(thresholdValue));
+    // --- UI Helper Methods ---
+
+    private void updateCannyLow(int delta) {
+        cannyLow += delta;
+        if (cannyLow > 255) cannyLow = 255;
+        if (cannyLow < 0) cannyLow = 0;
+        binding.cannyLowValueTextview.setText(String.valueOf(cannyLow));
     }
+
+    private void updateCannyHigh(int delta) {
+        cannyHigh += delta;
+        if (cannyHigh > 255) cannyHigh = 255;
+        if (cannyHigh < 0) cannyHigh = 0;
+        binding.cannyHighValueTextview.setText(String.valueOf(cannyHigh));
+    }
+
+    private void updateKernel(int delta) {
+        kernelSize += delta;
+        if (kernelSize < 3) kernelSize = 3; // Kernel must be at least 3x3 and odd
+        if (kernelSize % 2 == 0) kernelSize++; // Ensure it's odd
+        binding.kernelValueTextview.setText(String.valueOf(kernelSize));
+        // Re-create the kernel mat with the new size
+        matKernel.release(); // Release old mat
+        matKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(kernelSize, kernelSize));
+    }
+
+    private void updateDilate(int delta) {
+        dilateIterations += delta;
+        if (dilateIterations < 1) dilateIterations = 1; // Must be at least 1
+        binding.dilateValueTextview.setText(String.valueOf(dilateIterations));
+    }
+
+    private void updateErode(int delta) {
+        erodeIterations += delta;
+        if (erodeIterations < 1) erodeIterations = 1; // Must be at least 1
+        binding.erodeValueTextview.setText(String.valueOf(erodeIterations));
+    }
+
+    private void updateMinArea(int delta) {
+        minObstacleArea += delta;
+        if (minObstacleArea < 0) minObstacleArea = 0;
+        binding.minAreaValueTextview.setText(String.valueOf((int)minObstacleArea));
+    }
+
 
     @Override
     protected void processFrame(Bitmap image, ImageProxy imageProxy) {
+//        Log.d(TAG, "Rotation" + getRotationDegrees());
         // Check if all required objects are initialized
         if (vehicle == null || image == null || matFrame == null) {
             Log.e(TAG, "processFrame aborted: null objects");
@@ -274,24 +339,26 @@ public class LineTrackingFragment extends CameraFragment {
 
             // 1. Convert Bitmap to Mat (Bitmap is ARGB, matFrame becomes 4-channel RGBA)
             Utils.bitmapToMat(image, matFrame);
-
-            // 2. Rotate the frame
             Core.rotate(matFrame, matFrame, Core.ROTATE_90_CLOCKWISE);
 
-            // 3. Convert RGBA to BGR (3-channel) and clone for display
+            // 2. Convert RGBA to BGR (3-channel) and clone for display
             Imgproc.cvtColor(matFrame, matDisplay, Imgproc.COLOR_RGBA2BGR);
 
-            // 4. Grayscale and Blur
+            // 3. Grayscale and Blur
             Imgproc.cvtColor(matDisplay, matGray, Imgproc.COLOR_BGR2GRAY);
-            Imgproc.GaussianBlur(matGray, matBlur, BLUR_STRENGTH, 0);
+            Imgproc.GaussianBlur(matGray, matBlur, new Size(5, 5), 0);
 
-            // 5. Threshold Image (Blobs)
-            // We use the manual thresholdValue from the UI
-            Imgproc.threshold(matBlur, matThresh, thresholdValue, 255, thresholdMode);
+            // 4. Canny Edge Detection (use values from UI)
+            Imgproc.Canny(matBlur, matCanny, cannyLow, cannyHigh);
 
-            // 6. Find Contours
+            // 5. "Closing" Gaps
+            // Use new Point(-1,-1) for default anchor
+            Imgproc.dilate(matCanny, matDilated, matKernel, new Point(-1,-1), dilateIterations);
+            Imgproc.erode(matDilated, matClosed, matKernel, new Point(-1,-1), erodeIterations);
+
+            // 6. Find Contours (on the 'matClosed' image)
             contoursList.clear(); // Clear list from previous frame
-            Imgproc.findContours(matThresh, contoursList, matHierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
+            Imgproc.findContours(matClosed, contoursList, matHierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
 
             // 7. Find the largest contour
             double maxArea = 0;
@@ -308,7 +375,7 @@ public class LineTrackingFragment extends CameraFragment {
             double stopArea = matFrame.rows() * matFrame.cols() * STOP_AREA_PERCENT;
 
             if (isAutopilotOn) {
-                if (maxArea > MIN_OBSTACLE_AREA) {
+                if (maxArea > minObstacleArea) {
                     // We see an obstacle...
                     status = "OBSTACLE DETECTED";
                     if (maxArea > stopArea) {
@@ -322,9 +389,7 @@ public class LineTrackingFragment extends CameraFragment {
                         double cX = moments.get_m10() / moments.get_m00();
                         double imageCenterX = matFrame.cols() / 2.0;
 
-                        // Calculate error:
-                        // positive error: obstacle is on the right
-                        // negative error: obstacle is on the left
+                        // Calculate error
                         double error = cX - imageCenterX;
 
                         // Proportional turn.
@@ -360,8 +425,9 @@ public class LineTrackingFragment extends CameraFragment {
             Utils.matToBitmap(matDisplay, displayBitmap);
 
             // --- Debug "Blob" Display ---
-            // Convert 1-channel matThresh to 4-channel RGBA
-            Imgproc.cvtColor(matThresh, matFrame, Imgproc.COLOR_GRAY2RGBA);
+            // This shows the Canny + Closed image
+            // Convert 1-channel matClosed to 4-channel RGBA
+            Imgproc.cvtColor(matClosed, matFrame, Imgproc.COLOR_GRAY2RGBA);
             Bitmap debugBitmap = Bitmap.createBitmap(matFrame.cols(), matFrame.rows(), Bitmap.Config.ARGB_8888);
             Utils.matToBitmap(matFrame, debugBitmap);
 
@@ -372,12 +438,15 @@ public class LineTrackingFragment extends CameraFragment {
             final String finalStatus = status;
             if (getActivity() != null) {
                 getActivity().runOnUiThread(() -> {
-                    binding.processedImageView.setImageBitmap(displayBitmap);
-                    binding.debugBlobView.setImageBitmap(debugBitmap);
-                    binding.statusTextview.setText("Status: " + finalStatus);
-                    binding.inferenceTimeTextview.setText(
-                            String.format(Locale.US, "Inference: %d ms", lastProcessingTimeMs)
-                    );
+                    // Check if binding is still valid (in case view was destroyed)
+                    if (binding != null) {
+                        binding.processedImageView.setImageBitmap(displayBitmap);
+                        binding.debugBlobView.setImageBitmap(debugBitmap);
+                        binding.statusTextview.setText("Status: " + finalStatus);
+                        binding.inferenceTimeTextview.setText(
+                                String.format(Locale.US, "Inference: %d ms", lastProcessingTimeMs)
+                        );
+                    }
                 });
             }
 
@@ -393,7 +462,10 @@ public class LineTrackingFragment extends CameraFragment {
         if (matFrame != null) matFrame.release();
         if (matGray != null) matGray.release();
         if (matBlur != null) matBlur.release();
-        if (matThresh != null) matThresh.release();
+        if (matCanny != null) matCanny.release();
+        if (matKernel != null) matKernel.release();
+        if (matDilated != null) matDilated.release();
+        if (matClosed != null) matClosed.release();
         if (matHierarchy != null) matHierarchy.release();
         if (matDisplay != null) matDisplay.release();
 

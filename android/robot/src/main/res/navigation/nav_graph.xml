@@ -49,6 +49,9 @@
         <action
             android:id="@+id/action_mainFragment_to_lineTrackingFragment"
             app:destination="@id/lineTrackingFragment" />
+        <action
+            android:id="@+id/action_mainFragment_to_subjectSegmentation"
+            app:destination="@+id/subjectSegmentationFragment"></action>
 
     </fragment>
     <fragment
@@ -201,4 +204,11 @@
         android:name="org.openbot.lineTracking.LineTrackingFragment"
         android:label="Line Tracking"
         tools:layout="@layout/fragment_line_tracking" />
+
+    <fragment
+        android:id="@+id/subjectSegmentationFragment"
+        android:name="org.openbot.mlkit.subjectSegmentation.SubjectSegmentationFragment"
+        android:label="Subject Segmentation"
+        tools:layout="@layout/fragment_subject_segmentation" />
+
 </navigation>

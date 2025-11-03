@@ -43,6 +43,7 @@ public class FeatureList {
   public static final String AUTONOMOUS_DRIVING = "Autonomous Driving";
   public static final String VISUAL_GOALS = "Visual Goals";
   public static final String SMART_VOICE = "Smart Voice (left/right/straight, Ar Core)";
+  public static final String SUBJECT_SEGMENTATION = "Subject Segmentation";
 
   // Remote Access
   public static final String REMOTE_ACCESS = "Remote Access";
@@ -84,6 +85,7 @@ public class FeatureList {
 
     subCategories = new ArrayList<>();
     subCategories.add(new SubCategory(LINE_TRACKING, R.drawable.ic_autopilot, "#E7CE88"));
+    subCategories.add(new SubCategory(SUBJECT_SEGMENTATION, R.drawable.ic_autopilot, "#44525F"));
     subCategories.add(new SubCategory(AUTOPILOT, R.drawable.ic_autopilot, "#44525F"));
     subCategories.add(new SubCategory(DEPTH_DETECTION, R.drawable.ic_autopilot, "#44525F"));
     subCategories.add(new SubCategory(OBJECT_NAV, R.drawable.ic_person_search, "#E7CE88"));
