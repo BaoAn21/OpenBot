@@ -59,6 +59,8 @@ public class Vehicle {
   SharedPreferences sharedPreferences;
   public String connectionType;
 
+  private long stopCooldownUntil = 0;
+
   public float getMinMotorVoltage() {
     return minMotorVoltage;
   }
@@ -444,6 +446,13 @@ public class Vehicle {
       cmd = "RotateRight";
     } else if (right > THRESHOLD && left < -THRESHOLD) {
       cmd = "RotateLeft";
+    }
+
+    long now = System.currentTimeMillis();
+    if (now < stopCooldownUntil) {
+      // We are in the 2-second cooldown.
+      // Ignore all new commands.
+      return;
     }
 
     // If the calculated command is the same as the last one, do nothing.
