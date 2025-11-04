@@ -3,6 +3,7 @@ package org.openbot.mlkit.subjectSegmentation;
 import android.graphics.Bitmap;
 import android.graphics.Matrix;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -22,8 +23,8 @@ import org.openbot.R; // IMPORT THIS
 import org.openbot.common.CameraFragment;
 import org.openbot.databinding.FragmentSubjectSegmentationBinding;
 import org.openbot.utils.Constants;
-import org.openbot.utils.Enums; // IMPORT THIS
-import org.openbot.vehicle.Control; // IMPORT THIS
+import org.openbot.utils.Enums;
+import org.openbot.vehicle.Control;
 
 public class SubjectSegmentationFragment extends CameraFragment {
     private String TAG = "SubjectSegmentationFragment";
@@ -37,6 +38,18 @@ public class SubjectSegmentationFragment extends CameraFragment {
     private boolean isAutoMode = false;
     private Enums.SpeedMode currentSpeedMode;
     // ---------------------
+
+    private long lastProcessingTimeMs = 0;
+
+    // ---- DYNAMIC SPEED --- //
+    private static final float TARGET_INFERENCE_TIME_MS = 50.0f;
+    // At 300ms (or slower), drive at 30% speed
+    private static final float MAX_INFERENCE_TIME_MS = 300.0f;
+    // The minimum speed scale to use
+    private static final float MIN_SPEED_SCALE = 0.3f;
+    // The maximum speed scale to use
+    private static final float MAX_SPEED_SCALE = 1.0f;
+    // --- ////
 
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
@@ -178,6 +191,8 @@ public class SubjectSegmentationFragment extends CameraFragment {
         int rotation = getRotationDegrees();
         InputImage inputImage = InputImage.fromBitmap(image, rotation);
 
+        final long startTime = SystemClock.elapsedRealtime();
+
         segmenter.process(inputImage)
                 .addOnSuccessListener(
                         result -> {
@@ -187,6 +202,26 @@ public class SubjectSegmentationFragment extends CameraFragment {
                             }
 
                             Bitmap foregroundMask = result.getForegroundBitmap();
+
+                            lastProcessingTimeMs = SystemClock.elapsedRealtime() - startTime;
+
+                            // --- 1. DYNAMIC SPEED CALCULATION ---
+                            // Clamp the time between our min and max values
+                            float clampedTime = Math.max(TARGET_INFERENCE_TIME_MS, Math.min(lastProcessingTimeMs, MAX_INFERENCE_TIME_MS));
+
+                            // Calculate the time range and speed range
+                            float timeRange = MAX_INFERENCE_TIME_MS - TARGET_INFERENCE_TIME_MS; // e.g., 300 - 50 = 250
+                            float speedRange = MAX_SPEED_SCALE - MIN_SPEED_SCALE;            // e.g., 1.0 - 0.3 = 0.7
+
+                            // Normalize the time (0.0 = fastest, 1.0 = slowest)
+                            float normalizedTime = (clampedTime - TARGET_INFERENCE_TIME_MS) / timeRange;
+
+                            // Invert the value to get speed (1.0 = fastest, 0.3 = slowest)
+                            float dynamicSpeedScale = MAX_SPEED_SCALE - (normalizedTime * speedRange);
+
+                            Log.d(TAG, String.format("Inference: %dms, SpeedScale: %.2f", lastProcessingTimeMs, dynamicSpeedScale));
+                            // --- END OF SPEED CALCULATION ---
+
                             if (foregroundMask == null) {
                                 // No object detected, so GO FORWARD
                                 vehicle.setControl(new Control(1.0f, 1.0f));
@@ -223,7 +258,7 @@ public class SubjectSegmentationFragment extends CameraFragment {
                                 maskColor = android.graphics.Color.argb(150, 0, 255, 0); // GREEN
                             } else {
                                 // Object is "too far" - GO FORWARD
-                                vehicle.setControl(new Control(1.0f, 1.0f));
+                                vehicle.setControl(new Control(dynamicSpeedScale, dynamicSpeedScale));
                                 maskColor = android.graphics.Color.argb(150, 255, 0, 0); // RED
                             }
                             // ----------------------------------
