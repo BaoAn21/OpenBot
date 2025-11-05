@@ -19,7 +19,7 @@ public class NetworkUtils {
 
     private static final String TAG = "NetworkUtils";
     // <-- REPLACE WITH YOUR LAPTOP'S IP and the WebSocket port
-    private static final String SERVER_URL = "ws://10.253.175.225:8765";
+    private static final String SERVER_URL = "ws://192.168.143.117:8765";
     private static final int NORMAL_CLOSURE_STATUS = 1000;
 
     private static OkHttpClient client;

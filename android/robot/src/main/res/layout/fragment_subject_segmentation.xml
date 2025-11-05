@@ -115,6 +115,9 @@
                 android:layout_marginTop="8dp"
                 android:max="100"
                 android:progress="20" />
+            <include
+                android:id="@+id/controllerContainer"
+                layout="@layout/control_buttons" />
         </LinearLayout>
 
     </androidx.constraintlayout.widget.ConstraintLayout>

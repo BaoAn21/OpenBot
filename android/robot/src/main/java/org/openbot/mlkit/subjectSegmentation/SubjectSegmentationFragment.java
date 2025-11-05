@@ -3,7 +3,7 @@ package org.openbot.mlkit.subjectSegmentation;
 import android.graphics.Bitmap;
 import android.graphics.Matrix;
 import android.os.Bundle;
-import android.os.SystemClock;
+// import android.os.SystemClock; // No longer needed
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -26,6 +26,9 @@ import org.openbot.utils.Constants;
 import org.openbot.utils.Enums;
 import org.openbot.vehicle.Control;
 
+import java.util.Locale;
+import java.util.Random;
+
 public class SubjectSegmentationFragment extends CameraFragment {
     private String TAG = "SubjectSegmentationFragment";
 
@@ -37,18 +40,17 @@ public class SubjectSegmentationFragment extends CameraFragment {
     private int closenessThreshold = 20;
     private boolean isAutoMode = false;
     private Enums.SpeedMode currentSpeedMode;
+    private Random random = new Random();
+    private int currentZone = 0;
+    // This will store our "latched" turn direction
+    private boolean isTurningRight = false;
     // ---------------------
 
-    private long lastProcessingTimeMs = 0;
+    // private long lastProcessingTimeMs = 0; // Removed
 
-    // ---- DYNAMIC SPEED --- //
-    private static final float TARGET_INFERENCE_TIME_MS = 50.0f;
-    // At 300ms (or slower), drive at 30% speed
-    private static final float MAX_INFERENCE_TIME_MS = 300.0f;
-    // The minimum speed scale to use
-    private static final float MIN_SPEED_SCALE = 0.3f;
-    // The maximum speed scale to use
-    private static final float MAX_SPEED_SCALE = 1.0f;
+    // ---- AUTONOMOUS SPEED --- //
+    // Set the speed for all autonomous actions (forward, turn, reverse)
+    private static final float AUTONOMOUS_SPEED_SCALE = 1.0f; // 1.0f = 100% speed
     // --- ////
 
     @Override
@@ -191,7 +193,7 @@ public class SubjectSegmentationFragment extends CameraFragment {
         int rotation = getRotationDegrees();
         InputImage inputImage = InputImage.fromBitmap(image, rotation);
 
-        final long startTime = SystemClock.elapsedRealtime();
+        // final long startTime = SystemClock.elapsedRealtime(); // Removed
 
         segmenter.process(inputImage)
                 .addOnSuccessListener(
@@ -203,24 +205,7 @@ public class SubjectSegmentationFragment extends CameraFragment {
 
                             Bitmap foregroundMask = result.getForegroundBitmap();
 
-                            lastProcessingTimeMs = SystemClock.elapsedRealtime() - startTime;
-
-                            // --- 1. DYNAMIC SPEED CALCULATION ---
-                            // Clamp the time between our min and max values
-                            float clampedTime = Math.max(TARGET_INFERENCE_TIME_MS, Math.min(lastProcessingTimeMs, MAX_INFERENCE_TIME_MS));
-
-                            // Calculate the time range and speed range
-                            float timeRange = MAX_INFERENCE_TIME_MS - TARGET_INFERENCE_TIME_MS; // e.g., 300 - 50 = 250
-                            float speedRange = MAX_SPEED_SCALE - MIN_SPEED_SCALE;            // e.g., 1.0 - 0.3 = 0.7
-
-                            // Normalize the time (0.0 = fastest, 1.0 = slowest)
-                            float normalizedTime = (clampedTime - TARGET_INFERENCE_TIME_MS) / timeRange;
-
-                            // Invert the value to get speed (1.0 = fastest, 0.3 = slowest)
-                            float dynamicSpeedScale = MAX_SPEED_SCALE - (normalizedTime * speedRange);
-
-                            Log.d(TAG, String.format("Inference: %dms, SpeedScale: %.2f", lastProcessingTimeMs, dynamicSpeedScale));
-                            // --- END OF SPEED CALCULATION ---
+                            // lastProcessingTimeMs = SystemClock.elapsedRealtime() - startTime; // Removed
 
                             if (foregroundMask == null) {
                                 // No object detected, so GO FORWARD
@@ -251,15 +236,50 @@ public class SubjectSegmentationFragment extends CameraFragment {
                             Log.d(TAG, String.format("Object covers: %.2f%% (Threshold: %d%%)", areaPercentage, closenessThreshold));
 
                             // --- 2. AUTOPILOT LOGIC & COLOR ---
-                            final int maskColor;
-                            if (areaPercentage >= closenessThreshold) {
-                                // Object is "close enough" - STOP
-                                vehicle.setControl(new Control(0.0f, 0.0f));
-                                maskColor = android.graphics.Color.argb(150, 0, 255, 0); // GREEN
-                            } else {
-                                // Object is "too far" - GO FORWARD
-                                vehicle.setControl(new Control(dynamicSpeedScale, dynamicSpeedScale));
-                                maskColor = android.graphics.Color.argb(150, 255, 0, 0); // RED
+                            int maskColor;
+                            Control driveCommand;
+                            final float STOP_THRESHOLD = closenessThreshold;
+
+                            int newZone = 0; // 0=FAR
+                            if (areaPercentage >= STOP_THRESHOLD) {
+                                newZone = 1; // ROTATE
+                            }
+
+                            if (newZone != currentZone &&  newZone == 1) {
+                                isTurningRight = random.nextBoolean();
+                                Log.d(TAG, "New turn decision: " + (isTurningRight ? "RIGHT" : "LEFT"));
+                            }
+
+                            currentZone = newZone;
+
+                            switch (currentZone) {
+                                case 1: // ROTATE
+                                    if (isTurningRight) {
+                                        driveCommand = new Control(AUTONOMOUS_SPEED_SCALE, -AUTONOMOUS_SPEED_SCALE); // Turn Right
+                                    } else {
+                                        driveCommand = new Control(-AUTONOMOUS_SPEED_SCALE, AUTONOMOUS_SPEED_SCALE); // Turn Left
+                                    }
+                                    maskColor = android.graphics.Color.argb(150, 255, 255, 0); // YELLOW
+                                    break;
+                                case 0: // FAR
+                                default:
+                                    driveCommand = new Control(AUTONOMOUS_SPEED_SCALE* 0.5f, AUTONOMOUS_SPEED_SCALE* 0.5f);
+                                    maskColor = android.graphics.Color.argb(150, 255, 0, 0); // RED
+                                    break;
+                            }
+
+                            vehicle.setControl(driveCommand);
+
+                            if (getActivity() != null) {
+                                float left = vehicle.getLeftSpeed();
+                                float right = vehicle.getRightSpeed();
+                                Log.d(TAG, String.valueOf(left) + " " + String.valueOf(right));
+                                getActivity().runOnUiThread(() -> {
+                                    if (binding != null && binding.controllerContainer != null) {
+                                        binding.controllerContainer.controlInfo.setText(
+                                                String.format(Locale.US, "%.0f,%.0f", left, right));
+                                    }
+                                });
                             }
                             // ----------------------------------
 
@@ -309,6 +329,15 @@ public class SubjectSegmentationFragment extends CameraFragment {
 
     @Override
     protected void processUSBData(String data) {
-        // Not used in this fragment
+        // Add this check to avoid a crash if the binding is null
+//        if (binding == null || binding.controllerContainer == null) {
+//            return;
+//        }
+//
+//        binding.controllerContainer.speedInfo.setText(
+//                getString(
+//                        R.string.string.speedInfo,
+//                        String.format(
+//                                Locale.US, "%3.0f,%3.0f", vehicle.getLeftWheelRpm(), vehicle.getRightWheelRpm())));
     }
 }
