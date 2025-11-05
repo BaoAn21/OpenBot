@@ -1,0 +1,12 @@
+version: '3.7'
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto
+    container_name: my-mqtt-broker
+    ports:
+      - "1883:1883"
+    volumes:
+      # This links our config file into the container
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    restart: unless-stopped
