@@ -2,6 +2,10 @@ package org.openbot.vehicle;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.Log;
+
 import androidx.annotation.NonNull;
 import androidx.preference.PreferenceManager;
 import com.ficat.easyble.BleDevice;
@@ -18,10 +22,14 @@ import org.openbot.main.ScanDeviceAdapter;
 import org.openbot.utils.Enums;
 
 public class Vehicle {
+  private String TAG = "Vehicle";
 
   // MQTT
   private String mqttControlTopic = "robot/control"; // A default topic
   private String lastMqttCommand = "";
+
+  private Handler controlHandler = new Handler(Looper.getMainLooper());
+  private boolean isIgnoringCommands = false;
 
   private final Noise noise = new Noise(1000, 2000, 5000);
   private boolean noiseEnabled = false;
@@ -425,12 +433,18 @@ public class Vehicle {
     this.mqttControlTopic = topic;
   }
 
+   // 0.3 = 30% difference. Tune this!
+
   private void sendMqttControl() {
-    // Check if the global MqttService is initialized and connected
-    if (OpenBotApplication.mqttService == null || !OpenBotApplication.mqttService.isConnected()) {
+    if (isIgnoringCommands) {
+//      Log.d(TAG, "Ignoring command during cooldown");
       return;
     }
 
+     if (OpenBotApplication.mqttService == null || !OpenBotApplication.mqttService.isConnected()) {
+       return;
+     }
+    final float CENTER_THRESHOLD = 0.2f;
     String cmd = "";
     float left = control.getLeft();
     float right = control.getRight();
@@ -439,7 +453,16 @@ public class Vehicle {
     if (Math.abs(left) < THRESHOLD && Math.abs(right) < THRESHOLD) {
       cmd = "Stop";
     } else if (left > THRESHOLD && right > THRESHOLD) {
-      cmd = "Forward";
+      double difference = Math.abs(left - right);
+
+      if (difference < CENTER_THRESHOLD) {
+        cmd = "Forward";
+      } else if (right > left) {
+        cmd = "RotateLeft";
+      } else {
+        cmd = "RotateRight";
+      }
+
     } else if (left < -THRESHOLD && right < -THRESHOLD) {
       cmd = "Backward";
     } else if (left > THRESHOLD && right < -THRESHOLD) {
@@ -448,29 +471,33 @@ public class Vehicle {
       cmd = "RotateLeft";
     }
 
-    long now = System.currentTimeMillis();
-    if (now < stopCooldownUntil) {
-      // We are in the 2-second cooldown.
-      // Ignore all new commands.
-      return;
-    }
-
-    // If the calculated command is the same as the last one, do nothing.
     if (cmd.equals(lastMqttCommand)) {
       return;
     }
 
-    // If the last command was a movement command (not Stop), send "Stop" first.
-    if (!lastMqttCommand.isEmpty() && !lastMqttCommand.equals("Stop")) {
-      OpenBotApplication.mqttService.publish(mqttControlTopic, "Stop");
+    boolean needsToStop = !lastMqttCommand.isEmpty() && !lastMqttCommand.equals("Stop");
+
+    if (needsToStop) {
+       OpenBotApplication.mqttService.publish(mqttControlTopic, "Stop");
+      Log.d(TAG, "STOP");
+
+      isIgnoringCommands = true;
+      controlHandler.postDelayed(new Runnable() {
+        @Override
+        public void run() {
+          isIgnoringCommands = false;
+          Log.d(TAG, "Cooldown over. Accepting commands.");
+
+          lastMqttCommand = "Stop";
+        }
+      }, 2000);
+      return;
     }
 
-    // Send the new command.
     if (!cmd.isEmpty()) {
-      OpenBotApplication.mqttService.publish(mqttControlTopic, cmd);
+       OpenBotApplication.mqttService.publish(mqttControlTopic, cmd);
+      Log.d(TAG, cmd);
     }
-
-    // Update the last command with the new one we just sent.
     lastMqttCommand = cmd;
   }
 

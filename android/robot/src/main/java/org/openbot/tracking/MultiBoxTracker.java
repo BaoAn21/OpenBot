@@ -82,6 +82,8 @@ public class MultiBoxTracker {
   private float lastTrackedObjectX = 0.0f;
   private boolean searchDirectionIsLeft = false;
 
+  private boolean useObjectSearch = false;
+
   public MultiBoxTracker(final Context context) {
     for (final int color : COLORS) {
       availableColors.add(color);
@@ -204,25 +206,27 @@ public class MultiBoxTracker {
       }
 
     } else {
-      if (!isSearching) {
-        isSearching = true;
-        searchStartTime = System.currentTimeMillis();
-        final boolean rotated = sensorOrientation % 180 == 90;
-        float imgWidth = (float) (rotated ? frameHeight : frameWidth);
-        searchDirectionIsLeft = lastTrackedObjectX < imgWidth / 2;
-      }
+      if(useObjectSearch) {
+        if (!isSearching) {
+          isSearching = true;
+          searchStartTime = System.currentTimeMillis();
+          final boolean rotated = sensorOrientation % 180 == 90;
+          float imgWidth = (float) (rotated ? frameHeight : frameWidth);
+          searchDirectionIsLeft = lastTrackedObjectX < imgWidth / 2;
+        }
 
-      if (System.currentTimeMillis() - searchStartTime > SEARCH_DURATION_MS) {
-        isSearching = false;
-        leftControl = 0.0f;
-        rightControl = 0.0f;
-      } else {
-        if (searchDirectionIsLeft) {
-          leftControl = -0.5f;
-          rightControl = 0.5f;
+        if (System.currentTimeMillis() - searchStartTime > SEARCH_DURATION_MS) {
+          isSearching = false;
+          leftControl = 0.0f;
+          rightControl = 0.0f;
         } else {
-          leftControl = 0.5f;
-          rightControl = -0.5f;
+          if (searchDirectionIsLeft) {
+            leftControl = +0.5f;
+            rightControl = -0.5f;
+          } else {
+            leftControl = -0.5f;
+            rightControl = 0.5f;
+          }
         }
       }
     }
@@ -326,6 +330,17 @@ public class MultiBoxTracker {
    */
   public void setDynamicSpeed(boolean isEnabled) {
     useDynamicSpeed = isEnabled;
+  }
+
+  public void setSearchingEnabled(boolean isEnabled) {
+    useObjectSearch = isEnabled;
+
+    // If we just turned searching OFF, make sure we stop any active search.
+    if (!isEnabled) {
+      isSearching = false;
+      leftControl = 0.0f;
+      rightControl = 0.0f;
+    }
   }
 
   private static class TrackedRecognition {

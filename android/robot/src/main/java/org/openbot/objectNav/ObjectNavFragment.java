@@ -63,8 +63,6 @@ public class ObjectNavFragment extends CameraFragment {
 
   private BroadcastReceiver mqttReceiver;
 
-
-
   private boolean computingNetwork = false;
   public static float MINIMUM_CONFIDENCE_TF_OD_API = 0.5f;
 
@@ -113,6 +111,15 @@ public class ObjectNavFragment extends CameraFragment {
     super.onViewCreated(view, savedInstanceState);
 
     binding.confidenceValue.setText((int) (MINIMUM_CONFIDENCE_TF_OD_API * 100) + "%");
+
+    binding.searchSwitch.setOnClickListener(
+            v -> {
+              boolean isChecked = binding.searchSwitch.isChecked();
+              if (tracker != null) {
+                tracker.setSearchingEnabled(isChecked);
+              }
+            }
+    );
 
     binding.plusConfidence.setOnClickListener(
         v -> {
