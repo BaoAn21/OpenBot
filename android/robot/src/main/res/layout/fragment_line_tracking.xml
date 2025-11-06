@@ -1,30 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.coordinatorlayout.widget.CoordinatorLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     tools:context=".lineTracking.LineTrackingFragment">
 
-    <!-- This is the main display for the processed camera feed (with contours) -->
+    <!-- This ImageView will display the camera feed -->
+    <!-- We will draw our overlay on a separate bitmap and set it here -->
     <ImageView
-        android:id="@+id/processedImageView"
+        android:id="@+id/overlay_image_view"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:scaleType="fitCenter" />
+        android:scaleType="fitStart"
+        android:contentDescription="Line Tracking Overlay" />
 
-    <!-- This is the Bottom Sheet for all AI controls -->
-    <!-- Increased peekHeight to show all new controls -->
+    <!--
+      This is the Bottom Sheet for controls.
+    -->
     <androidx.constraintlayout.widget.ConstraintLayout
-        android:id="@+id/aiBottomSheet"
+        android:id="@+id/bottom_sheet_controls"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="@drawable/bottom_sheet_bg"
         app:behavior_hideable="false"
-        app:behavior_peekHeight="500dp"
+        app:behavior_peekHeight="48dp"
         app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior">
 
+        <!-- The "drag handle" -->
         <View
             android:id="@+id/view"
             android:layout_width="48dp"
@@ -36,335 +39,121 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
 
-        <ImageView
-            android:id="@+id/cameraToggleButton"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_marginTop="8dp"
-            android:layout_marginEnd="16dp"
-            android:background="@drawable/button_item_background_black"
-            android:padding="8dp"
-            android:src="@drawable/ic_cameraswitch"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/view" />
-
-        <TextView
-            android:id="@+id/inferenceTimeTextview"
+        <!-- Autopilot Switch -->
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/auto_switch"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="16dp"
             android:layout_marginTop="16dp"
-            android:text="Inference: --- ms"
-            android:textSize="16sp"
-            android:textColor="@android:color/black"
+            android:text="Autopilot"
+            android:textSize="18sp"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/cameraToggleButton" />
+            app:layout_constraintTop_toBottomOf="@id/view" />
 
-        <!-- Canny Low Threshold Control -->
-        <LinearLayout
-            android:id="@+id/cannyLowControlLayout"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:gravity="center_vertical"
-            app:layout_constraintStart_toStartOf="@id/inferenceTimeTextview"
-            app:layout_constraintTop_toBottomOf="@id/inferenceTimeTextview"
-            app:layout_constraintEnd_toEndOf="parent"
-            android:layout_marginEnd="16dp">
-            <TextView
-                android:layout_width="100dp"
-                android:layout_height="wrap_content"
-                android:text="Canny Low:"
-                android:textSize="16sp"
-                android:textColor="@android:color/black" />
-            <ImageView
-                android:id="@+id/minusCannyLowButton"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:layout_marginStart="16dp"
-                android:background="@drawable/spinner_bg"
-                android:contentDescription="@string/minus"
-                android:src="@drawable/ic_baseline_remove" />
-            <TextView
-                android:id="@+id/cannyLowValueTextview"
-                android:layout_width="60dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:gravity="center"
-                android:text="30"
-                android:textColor="@android:color/black"
-                android:textSize="16sp" />
-            <ImageView
-                android:id="@+id/plusCannyLowButton"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/spinner_bg"
-                android:contentDescription="@string/plus"
-                android:src="@drawable/ic_baseline_add" />
-        </LinearLayout>
-
-        <!-- Canny High Threshold Control -->
-        <LinearLayout
-            android:id="@+id/cannyHighControlLayout"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:gravity="center_vertical"
-            app:layout_constraintStart_toStartOf="@id/cannyLowControlLayout"
-            app:layout_constraintTop_toBottomOf="@id/cannyLowControlLayout"
-            app:layout_constraintEnd_toEndOf="parent"
-            android:layout_marginEnd="16dp">
-            <TextView
-                android:layout_width="100dp"
-                android:layout_height="wrap_content"
-                android:text="Canny High:"
-                android:textSize="16sp"
-                android:textColor="@android:color/black" />
-            <ImageView
-                android:id="@+id/minusCannyHighButton"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:layout_marginStart="16dp"
-                android:background="@drawable/spinner_bg"
-                android:contentDescription="@string/minus"
-                android:src="@drawable/ic_baseline_remove" />
-            <TextView
-                android:id="@+id/cannyHighValueTextview"
-                android:layout_width="60dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:gravity="center"
-                android:text="100"
-                android:textColor="@android:color/black"
-                android:textSize="16sp" />
-            <ImageView
-                android:id="@+id/plusCannyHighButton"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/spinner_bg"
-                android:contentDescription="@string/plus"
-                android:src="@drawable/ic_baseline_add" />
-        </LinearLayout>
-
-        <!-- NEW: Kernel Size Control -->
-        <LinearLayout
-            android:id="@+id/kernelControlLayout"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:gravity="center_vertical"
-            app:layout_constraintStart_toStartOf="@id/cannyHighControlLayout"
-            app:layout_constraintTop_toBottomOf="@id/cannyHighControlLayout"
-            app:layout_constraintEnd_toEndOf="parent"
-            android:layout_marginEnd="16dp">
-            <TextView
-                android:layout_width="100dp"
-                android:layout_height="wrap_content"
-                android:text="Kernel Size:"
-                android:textSize="16sp"
-                android:textColor="@android:color/black" />
-            <ImageView
-                android:id="@+id/minusKernelButton"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:layout_marginStart="16dp"
-                android:background="@drawable/spinner_bg"
-                android:contentDescription="@string/minus"
-                android:src="@drawable/ic_baseline_remove" />
-            <TextView
-                android:id="@+id/kernelValueTextview"
-                android:layout_width="60dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:gravity="center"
-                android:text="7"
-                android:textColor="@android:color/black"
-                android:textSize="16sp" />
-            <ImageView
-                android:id="@+id/plusKernelButton"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/spinner_bg"
-                android:contentDescription="@string/plus"
-                android:src="@drawable/ic_baseline_add" />
-        </LinearLayout>
-
-        <!-- NEW: Dilate Iterations Control -->
-        <LinearLayout
-            android:id="@+id/dilateControlLayout"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:gravity="center_vertical"
-            app:layout_constraintStart_toStartOf="@id/kernelControlLayout"
-            app:layout_constraintTop_toBottomOf="@id/kernelControlLayout"
-            app:layout_constraintEnd_toEndOf="parent"
-            android:layout_marginEnd="16dp">
-            <TextView
-                android:layout_width="100dp"
-                android:layout_height="wrap_content"
-                android:text="Dilate Iter:"
-                android:textSize="16sp"
-                android:textColor="@android:color/black" />
-            <ImageView
-                android:id="@+id/minusDilateButton"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:layout_marginStart="16dp"
-                android:background="@drawable/spinner_bg"
-                android:contentDescription="@string/minus"
-                android:src="@drawable/ic_baseline_remove" />
-            <TextView
-                android:id="@+id/dilateValueTextview"
-                android:layout_width="60dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:gravity="center"
-                android:text="3"
-                android:textColor="@android:color/black"
-                android:textSize="16sp" />
-            <ImageView
-                android:id="@+id/plusDilateButton"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/spinner_bg"
-                android:contentDescription="@string/plus"
-                android:src="@drawable/ic_baseline_add" />
-        </LinearLayout>
-
-        <!-- NEW: Erode Iterations Control -->
-        <LinearLayout
-            android:id="@+id/erodeControlLayout"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:gravity="center_vertical"
-            app:layout_constraintStart_toStartOf="@id/dilateControlLayout"
-            app:layout_constraintTop_toBottomOf="@id/dilateControlLayout"
-            app:layout_constraintEnd_toEndOf="parent"
-            android:layout_marginEnd="16dp">
-            <TextView
-                android:layout_width="100dp"
-                android:layout_height="wrap_content"
-                android:text="Erode Iter:"
-                android:textSize="16sp"
-                android:textColor="@android:color/black" />
-            <ImageView
-                android:id="@+id/minusErodeButton"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:layout_marginStart="16dp"
-                android:background="@drawable/spinner_bg"
-                android:contentDescription="@string/minus"
-                android:src="@drawable/ic_baseline_remove" />
-            <TextView
-                android:id="@+id/erodeValueTextview"
-                android:layout_width="60dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:gravity="center"
-                android:text="2"
-                android:textColor="@android:color/black"
-                android:textSize="16sp" />
-            <ImageView
-                android:id="@+id/plusErodeButton"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/spinner_bg"
-                android:contentDescription="@string/plus"
-                android:src="@drawable/ic_baseline_add" />
-        </LinearLayout>
-
-        <!-- NEW: Min Area Control -->
-        <LinearLayout
-            android:id="@+id/minAreaControlLayout"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:gravity="center_vertical"
-            app:layout_constraintStart_toStartOf="@id/erodeControlLayout"
-            app:layout_constraintTop_toBottomOf="@id/erodeControlLayout"
-            app:layout_constraintEnd_toEndOf="parent"
-            android:layout_marginEnd="16dp">
-            <TextView
-                android:layout_width="100dp"
-                android:layout_height="wrap_content"
-                android:text="Min Area:"
-                android:textSize="16sp"
-                android:textColor="@android:color/black" />
-            <ImageView
-                android:id="@+id/minusMinAreaButton"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:layout_marginStart="16dp"
-                android:background="@drawable/spinner_bg"
-                android:contentDescription="@string/minus"
-                android:src="@drawable/ic_baseline_remove" />
-            <TextView
-                android:id="@+id/minAreaValueTextview"
-                android:layout_width="60dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:gravity="center"
-                android:text="1000"
-                android:textColor="@android:color/black"
-                android:textSize="16sp" />
-            <ImageView
-                android:id="@+id/plusMinAreaButton"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/spinner_bg"
-                android:contentDescription="@string/plus"
-                android:src="@drawable/ic_baseline_add" />
-        </LinearLayout>
-
-
+        <!-- Error Indicator Text -->
         <TextView
-            android:id="@+id/statusTextview"
+            android:id="@+id/error_text"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="Status: STOPPED"
-            android:textSize="16sp"
-            android:textColor="@android:color/black"
-            android:textStyle="bold"
-            app:layout_constraintStart_toStartOf="@id/minAreaControlLayout"
-            app:layout_constraintTop_toBottomOf="@id/minAreaControlLayout" />
-
-        <TextView
-            android:id="@+id/autopilotToggleButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Autopilot: OFF (Tap to start)"
-            android:textSize="16sp"
-            android:textColor="@android:color/holo_red_dark"
-            android:textStyle="bold"
-            android:padding="8dp"
-            android:background="@drawable/button_item_background_black"
-            app:layout_constraintStart_toStartOf="@id/statusTextview"
-            app:layout_constraintTop_toBottomOf="@id/statusTextview" />
-
-        <!-- This will show the Canny + Closed image (the "blob") -->
-        <ImageView
-            android:id="@+id/debugBlobView"
-            android:layout_width="150dp"
-            android:layout_height="150dp"
-            android:layout_marginTop="16dp"
             android:layout_marginEnd="16dp"
-            android:layout_marginBottom="16dp"
-            android:background="@android:color/darker_gray"
-            android:scaleType="fitCenter"
-            android:contentDescription="Debug blob visualization"
+            android:textColor="@android:color/black"
+            android:textSize="18sp"
+            android:textStyle="bold"
             app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintTop_toBottomOf="@+id/statusTextview"
-            app:layout_constraintBottom_toBottomOf="parent" />
+            app:layout_constraintTop_toTopOf="@id/auto_switch"
+            app:layout_constraintBottom_toBottomOf="@id/auto_switch"
+            tools:text="Error: +25" />
+
+        <!-- Controls for ROI and Angle -->
+        <LinearLayout
+            android:id="@+id/controls_layout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:layout_marginTop="8dp"
+            app:layout_constraintTop_toBottomOf="@id/auto_switch"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <!-- ROI Width Slider -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="ROI Width"
+                    android:textColor="@android:color/black"
+                    android:textSize="16sp" />
+
+                <TextView
+                    android:id="@+id/roi_width_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/black"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    tools:text="50%" />
+            </LinearLayout>
+
+            <SeekBar
+                android:id="@+id/roi_width_seekbar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:max="90"
+                android:progress="50" />
+
+            <!-- Angle Tolerance Slider -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="16dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Angle Tolerance"
+                    android:textColor="@android:color/black"
+                    android:textSize="16sp" />
+
+                <TextView
+                    android:id="@+id/angle_tolerance_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/black"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    tools:text="±20°" />
+            </LinearLayout>
+
+            <SeekBar
+                android:id="@+id/angle_tolerance_seekbar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:max="45"
+                android:progress="20" />
+        </LinearLayout>
+
+        <!-- Include the standard control buttons -->
+        <include
+            android:id="@+id/controllerContainer"
+            layout="@layout/control_buttons"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:layout_constraintTop_toBottomOf="@id/controls_layout"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
+
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
