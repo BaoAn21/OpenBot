@@ -3,6 +3,7 @@ package org.openbot.lineTracking; // Make sure this package is correct
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.os.Bundle;
@@ -53,6 +54,9 @@ public class LineTrackingFragment extends CameraFragment {
     private Mat matGray;
     private Mat matCanny;
     private Mat houghLines;
+
+    private Matrix rotationMatrix;
+    private Bitmap rotatedBitmap;
 
 
     @Override
@@ -127,6 +131,8 @@ public class LineTrackingFragment extends CameraFragment {
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
+        rotationMatrix = new Matrix();
+        rotationMatrix.postRotate(90);
     }
 
     private void setAutoMode(boolean isEnabled) {
@@ -153,18 +159,22 @@ public class LineTrackingFragment extends CameraFragment {
             return;
         }
 
-        // --- 1. Initialize Overlay Canvas ---
-        // We re-create this each time to match the input image size
-        if (overlayBitmap == null || overlayBitmap.getWidth() != image.getWidth() || overlayBitmap.getHeight() != image.getHeight()) {
-            overlayBitmap = Bitmap.createBitmap(image.getWidth(), image.getHeight(), Bitmap.Config.ARGB_8888);
+        // --- 1. ROTATE THE BITMAP FIRST (Your Idea) ---
+        // Create the rotated bitmap from the original image
+        rotatedBitmap = Bitmap.createBitmap(image, 0, 0, image.getWidth(), image.getHeight(), rotationMatrix, true);
+
+
+        // --- 2. Initialize Overlay Canvas ---
+        // Create an overlay that matches the new *rotated* bitmap
+        if (overlayBitmap == null || overlayBitmap.getWidth() != rotatedBitmap.getWidth() || overlayBitmap.getHeight() != rotatedBitmap.getHeight()) {
+            overlayBitmap = Bitmap.createBitmap(rotatedBitmap.getWidth(), rotatedBitmap.getHeight(), Bitmap.Config.ARGB_8888);
             overlayCanvas = new Canvas(overlayBitmap);
         }
-        // Clear the canvas for this frame
         overlayCanvas.drawColor(Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR);
 
-        // --- 2. Define ROI ---
-        int w = image.getWidth();
-        int h = image.getHeight();
+        // --- 3. Define ROI (on the rotated 480x640 image) ---
+        int w = rotatedBitmap.getWidth();  // e.g., 480
+        int h = rotatedBitmap.getHeight(); // e.g., 640
         int roiWidth = w * roiWidthPercent / 100;
         int roiLeft = (w - roiWidth) / 2;
         Rect roiRect = new Rect(roiLeft, 0, roiLeft + roiWidth, h);
@@ -176,8 +186,8 @@ public class LineTrackingFragment extends CameraFragment {
         float centerX = w / 2.0f;
         overlayCanvas.drawLine(centerX, 0, centerX, h, robotDirPaint);
 
-        // --- 3. OpenCV Processing ---
-        Utils.bitmapToMat(image, mat); // Convert bitmap to Mat
+        // --- 4. OpenCV Processing ---
+        Utils.bitmapToMat(rotatedBitmap, mat); // Convert the *rotated* bitmap to Mat
 
         // Crop to Region of Interest
         Mat roiMat = new Mat(mat, new org.opencv.core.Rect(roiRect.left, roiRect.top, roiRect.width(), roiRect.height()));
@@ -192,11 +202,16 @@ public class LineTrackingFragment extends CameraFragment {
         houghLines = new Mat();
         Imgproc.HoughLinesP(matCanny, houghLines, 1, Math.PI / 180, 50, 50, 10);
 
-        // --- 4. Filter Lines & Calculate Average ---
+        // --- 5. Filter Lines & Calculate Average ---
         double avgLineX = 0;
         int lineCount = 0;
+
+        // VVVVVV  BACK TO ORIGINAL LOGIC VVVVVV
+        // Now we look for vertical lines again, which is intuitive
         double minAngle = 90.0 - angleTolerance;
         double maxAngle = 90.0 + angleTolerance;
+        // ^^^^^^  BACK TO ORIGINAL LOGIC ^^^^^^
+
 
         for (int i = 0; i < houghLines.rows(); i++) {
             double[] line = houghLines.get(i, 0);
@@ -215,13 +230,14 @@ public class LineTrackingFragment extends CameraFragment {
             }
         }
 
-        // --- 5. Calculate Error and Steer ---
+        // --- 6. Calculate Error and Steer ---
         Control driveCommand;
         double error = 0;
 
         if (lineCount > 0) {
             // Find the average X position of the "good" lines
             double finalAvgX = avgLineX / lineCount;
+            // Get the X position *relative to the full screen*
             double detectedLineScreenX = roiRect.left + finalAvgX;
 
             // Calculate error: difference between detected line and robot's center
@@ -231,15 +247,13 @@ public class LineTrackingFragment extends CameraFragment {
             overlayCanvas.drawLine((float)detectedLineScreenX, 0, (float)detectedLineScreenX, h, detectedLinePaintError);
 
             // Steering Logic (P-Controller)
-            final double STEERING_SENSITIVITY = 0.5; // Adjust this to make steering more/less aggressive
+            final double STEERING_SENSITIVITY = 0.5;
             float turn = (float)(error / (w / 2.0)) * (float)STEERING_SENSITIVITY;
 
-            // Simple P-Controller: Go forward, and add/subtract "turn"
             float speed = 1.0f; // Autonomous speed scale
             float left = speed - turn;
             float right = speed + turn;
 
-            // Clamp values between -1.0 and 1.0
             left = Math.max(-1.0f, Math.min(1.0f, left));
             right = Math.max(-1.0f, Math.min(1.0f, right));
 
@@ -250,7 +264,7 @@ public class LineTrackingFragment extends CameraFragment {
             driveCommand = new Control(0.0f, 0.0f);
         }
 
-        // --- 6. Update UI and Send Command ---
+        // --- 7. Update UI and Send Command ---
         vehicle.setControl(driveCommand);
 
         if (getActivity() != null) {
@@ -260,12 +274,11 @@ public class LineTrackingFragment extends CameraFragment {
 
             getActivity().runOnUiThread(() -> {
                 if (binding != null) {
-                    // Update error text
                     binding.errorText.setText(String.format(Locale.US, "Error: %.0f", finalError));
-                    // Update motor command text
                     binding.controllerContainer.controlInfo.setText(
                             String.format(Locale.US, "%.0f,%.0f", left, right));
-                    // Set the new overlay bitmap
+
+                    // IMPORTANT: Set the overlay image, not the raw camera image
                     binding.overlayImageView.setImageBitmap(overlayBitmap);
                 }
             });
@@ -275,7 +288,6 @@ public class LineTrackingFragment extends CameraFragment {
         roiMat.release();
         houghLines.release();
     }
-
     @Override
     protected void processUSBData(String data) {
         if (binding != null && binding.controllerContainer != null) {
