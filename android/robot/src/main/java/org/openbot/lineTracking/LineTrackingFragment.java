@@ -7,6 +7,8 @@ import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.os.Bundle;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -40,6 +42,10 @@ public class LineTrackingFragment extends CameraFragment {
     // --- Processing and Drawing Variables ---
     private int roiWidthPercent = 50; // 50% of screen width
     private int angleTolerance = 20;  // ±20 degrees from vertical
+
+    private int cannyStart = 70;
+
+    private int cannyEnd = 210;
 
     private Bitmap overlayBitmap;
     private Canvas overlayCanvas;
@@ -131,6 +137,49 @@ public class LineTrackingFragment extends CameraFragment {
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
+
+        binding.cannyStartInput.setText(String.valueOf(cannyStart));
+        binding.cannyEndInput.setText(String.valueOf(cannyEnd));
+
+        binding.cannyStartInput.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence charSequence, int i, int i1, int i2) {
+
+            }
+
+            @Override
+            public void onTextChanged(CharSequence charSequence, int i, int i1, int i2) {
+
+            }
+
+            @Override
+            public void afterTextChanged(Editable editable) {
+                try {
+                    int value = Integer.parseInt(editable.toString());
+                    if (value < 0) value = 0;
+                    cannyStart = value;
+                } catch (NumberFormatException e) {
+                    cannyStart = 0; // Default to 0 if empty/invalid
+                }
+            }
+        });
+
+        binding.cannyEndInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                try {
+                    int value = Integer.parseInt(s.toString());
+                    if (value < 0) value = 0;
+                    cannyEnd = value;
+                } catch (NumberFormatException e) {
+                    cannyEnd = 0; // Default to 0 if empty/invalid
+                }
+            }
+        });
+
         rotationMatrix = new Matrix();
         rotationMatrix.postRotate(90);
     }
@@ -173,8 +222,9 @@ public class LineTrackingFragment extends CameraFragment {
         overlayCanvas.drawColor(Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR);
 
         // --- 3. Define ROI (on the rotated 480x640 image) ---
-        int w = rotatedBitmap.getWidth();  // e.g., 480
+        int w = rotatedBitmap.getWidth();
         int h = rotatedBitmap.getHeight(); // e.g., 640
+        Log.d(TAG, String.valueOf(w) + " " + String.valueOf(h));
         int roiWidth = w * roiWidthPercent / 100;
         int roiLeft = (w - roiWidth) / 2;
         Rect roiRect = new Rect(roiLeft, 0, roiLeft + roiWidth, h);
@@ -196,7 +246,7 @@ public class LineTrackingFragment extends CameraFragment {
         Imgproc.cvtColor(roiMat, matGray, Imgproc.COLOR_RGB2GRAY);
 
         // Canny Edge Detection
-        Imgproc.Canny(matGray, matCanny, 50, 150);
+        Imgproc.Canny(matGray, matCanny, cannyStart, cannyEnd);
 
         // Hough Line Transform
         houghLines = new Mat();
@@ -206,21 +256,15 @@ public class LineTrackingFragment extends CameraFragment {
         double avgLineX = 0;
         int lineCount = 0;
 
-        // VVVVVV  BACK TO ORIGINAL LOGIC VVVVVV
-        // Now we look for vertical lines again, which is intuitive
         double minAngle = 90.0 - angleTolerance;
         double maxAngle = 90.0 + angleTolerance;
-        // ^^^^^^  BACK TO ORIGINAL LOGIC ^^^^^^
-
 
         for (int i = 0; i < houghLines.rows(); i++) {
             double[] line = houghLines.get(i, 0);
             double x1 = line[0], y1 = line[1], x2 = line[2], y2 = line[3];
 
-            // Calculate angle
             double angle = Math.abs(Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI);
 
-            // Filter by angle (keep "vertical-ish" lines)
             if (angle > minAngle && angle < maxAngle) {
                 lineCount++;
                 avgLineX += (x1 + x2) / 2.0;
