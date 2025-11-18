@@ -6,8 +6,6 @@
     android:layout_height="match_parent"
     tools:context=".lineTracking.LineTrackingFragment">
 
-    <!-- This ImageView will display the camera feed -->
-    <!-- We will draw our overlay on a separate bitmap and set it here -->
     <ImageView
         android:id="@+id/overlay_image_view"
         android:layout_width="match_parent"
@@ -15,9 +13,6 @@
         android:scaleType="fitStart"
         android:contentDescription="Line Tracking Overlay" />
 
-    <!--
-      This is the Bottom Sheet for controls.
-    -->
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/bottom_sheet_controls"
         android:layout_width="match_parent"
@@ -27,7 +22,6 @@
         app:behavior_peekHeight="48dp"
         app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior">
 
-        <!-- The "drag handle" -->
         <View
             android:id="@+id/view"
             android:layout_width="48dp"
@@ -39,7 +33,6 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
 
-        <!-- Autopilot Switch -->
         <androidx.appcompat.widget.SwitchCompat
             android:id="@+id/auto_switch"
             android:layout_width="wrap_content"
@@ -51,21 +44,17 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@id/view" />
 
-        <!-- Error Indicator Text -->
         <TextView
             android:id="@+id/error_text"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginEnd="16dp"
-            android:textColor="@android:color/black"
-            android:textSize="18sp"
-            android:textStyle="bold"
+            android:textColor="@android:color/black"  android:textSize="18sp"  android:textStyle="bold"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintTop_toTopOf="@id/auto_switch"
             app:layout_constraintBottom_toBottomOf="@id/auto_switch"
             tools:text="Error: +25" />
 
-        <!-- Controls for ROI and Angle -->
         <LinearLayout
             android:id="@+id/controls_layout"
             android:layout_width="match_parent"
@@ -77,7 +66,43 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent">
 
-            <!-- ROI Width Slider -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Line Color"
+                android:textColor="@android:color/black"
+                android:textSize="16sp"
+                android:layout_marginBottom="8dp"/>
+
+            <RadioGroup
+                android:id="@+id/color_selector_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="16dp">
+
+                <RadioButton
+                    android:id="@+id/rb_yellow"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Yellow"
+                    android:checked="true"
+                    android:layout_weight="1"/>
+
+                <RadioButton
+                    android:id="@+id/rb_black"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Black"
+                    android:layout_weight="1"/>
+
+                <RadioButton
+                    android:id="@+id/rb_white"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="White"
+                    android:layout_weight="1"/>
+            </RadioGroup>
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -87,29 +112,26 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="ROI Width"
-                    android:textColor="@android:color/black"
-                    android:textSize="16sp" />
+                    android:text="Scan Y Position"
+                    android:textColor="@android:color/black"  android:textSize="16sp" />
 
                 <TextView
-                    android:id="@+id/roi_width_text"
+                    android:id="@+id/scan_y_text"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textColor="@android:color/black"
-                    android:textSize="16sp"
+                    android:textColor="@android:color/black"  android:textSize="16sp"
                     android:textStyle="bold"
-                    tools:text="50%" />
+                    tools:text="480" />
             </LinearLayout>
 
             <SeekBar
-                android:id="@+id/roi_width_seekbar"
+                android:id="@+id/scan_y_seekbar"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:max="90"
-                android:progress="50" />
+                android:max="639"
+                android:progress="480" />
 
-            <!-- Angle Tolerance Slider -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -120,100 +142,29 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Angle Tolerance"
-                    android:textColor="@android:color/black"
-                    android:textSize="16sp" />
+                    android:text="Scan Height"
+                    android:textColor="@android:color/black"  android:textSize="16sp" />
 
                 <TextView
-                    android:id="@+id/angle_tolerance_text"
+                    android:id="@+id/scan_height_text"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textColor="@android:color/black"
-                    android:textSize="16sp"
+                    android:textColor="@android:color/black"  android:textSize="16sp"
                     android:textStyle="bold"
-                    tools:text="±20°" />
+                    tools:text="20" />
             </LinearLayout>
 
             <SeekBar
-                android:id="@+id/angle_tolerance_seekbar"
+                android:id="@+id/scan_height_seekbar"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:max="45"
+                android:max="100"
+                android:min="1"
                 android:progress="20" />
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginBottom="16dp"> <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Canny Start"
-                android:textColor="@android:color/black"
-                android:textSize="16sp" />
-
-                <EditText
-                    android:id="@+id/canny_start_input"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:minWidth="80dp"
-                    android:gravity="end"
-                    android:hint="70"
-                    android:inputType="number"
-                    android:maxLength="3" android:textColor="@android:color/black"
-                    android:textSize="16sp"
-                    android:textStyle="bold"
-                    tools:text="70" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="4dp"
-                    android:text="%"
-                    android:textColor="@android:color/black"
-                    android:textSize="16sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Canny End"
-                    android:textColor="@android:color/black"
-                    android:textSize="16sp" />
-
-                <EditText
-                    android:id="@+id/canny_end_input"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:minWidth="80dp"
-                    android:gravity="end"
-                    android:hint="150"
-                    android:inputType="number"
-                    android:maxLength="3" android:textColor="@android:color/black"
-                    android:textSize="16sp"
-                    android:textStyle="bold"
-                    tools:text="150" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="4dp"
-                    android:text="%"
-                    android:textColor="@android:color/black"
-                    android:textSize="16sp" />
-            </LinearLayout>
         </LinearLayout>
 
-        <!-- Include the standard control buttons -->
+
         <include
             android:id="@+id/controllerContainer"
             layout="@layout/control_buttons"

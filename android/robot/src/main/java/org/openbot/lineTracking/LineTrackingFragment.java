@@ -1,4 +1,4 @@
-package org.openbot.lineTracking; // Make sure this package is correct
+package org.openbot.lineTracking;
 
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -7,8 +7,6 @@ import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.os.Bundle;
-import android.text.Editable;
-import android.text.TextWatcher;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -25,8 +23,10 @@ import org.openbot.databinding.FragmentLineTrackingBinding;
 import org.openbot.utils.Constants;
 import org.openbot.vehicle.Control;
 
-// OpenCV Imports - ASSUMES OPENCV IS IN YOUR PROJECT
+// OpenCV Imports
 import org.opencv.android.Utils;
+import org.opencv.core.Core;
+import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.Scalar;
 import org.opencv.imgproc.Imgproc;
@@ -40,26 +40,33 @@ public class LineTrackingFragment extends CameraFragment {
     private boolean isAutoMode = false;
 
     // --- Processing and Drawing Variables ---
-    private int roiWidthPercent = 50; // 50% of screen width
-    private int angleTolerance = 20;  // ±20 degrees from vertical
-
-    private int cannyStart = 70;
-
-    private int cannyEnd = 210;
-
     private Bitmap overlayBitmap;
     private Canvas overlayCanvas;
-
     private Paint roiPaint;
     private Paint robotDirPaint;
-    private Paint detectedLinePaint;
     private Paint detectedLinePaintError;
 
-    // OpenCV Mats - allocated once to be efficient
+    // --- Color Tracking Variables ---
+    private int scanY = 480;
+    private int scanHeight = 20;
+
+    // TUNE THIS: HSV Color Thresholds for the line (e.g., yellow)
+    private Scalar colorThrLow = new Scalar(20, 100, 100);  // Yellow
+    private Scalar colorThrHi = new Scalar(30, 255, 255); // Yellow
+
+    private int targetPixel = 0;
+    private final double CONFIDENCE_THRESHOLD = 500;
+
+    // --- PID VARIABLES REMOVED ---
+    // No Kp, Ki, Kd, previousError, or integralError needed.
+
+    // --- OpenCV Mats ---
     private Mat mat;
     private Mat matGray;
-    private Mat matCanny;
-    private Mat houghLines;
+    private Mat matHsv;
+    private Mat matMask;
+    private Mat matSlice;
+    private Mat matHist;
 
     private Matrix rotationMatrix;
     private Bitmap rotatedBitmap;
@@ -67,7 +74,6 @@ public class LineTrackingFragment extends CameraFragment {
 
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
-        // Inflate the layout for this fragment
         binding = FragmentLineTrackingBinding.inflate(inflater, container, false);
         return inflateFragment(binding, inflater, container);
     }
@@ -76,23 +82,20 @@ public class LineTrackingFragment extends CameraFragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
+        Log.d(TAG, String.valueOf(getRotationDegrees()));
+
         // Initialize Paint objects
         roiPaint = new Paint();
         roiPaint.setColor(Color.BLUE);
         roiPaint.setStyle(Paint.Style.STROKE);
         roiPaint.setStrokeWidth(3);
-        roiPaint.setAlpha(100); // Semi-transparent
+        roiPaint.setAlpha(100);
 
         robotDirPaint = new Paint();
         robotDirPaint.setColor(Color.GREEN);
         robotDirPaint.setStyle(Paint.Style.STROKE);
         robotDirPaint.setStrokeWidth(5);
         robotDirPaint.setPathEffect(new android.graphics.DashPathEffect(new float[]{10, 10}, 0));
-
-        detectedLinePaint = new Paint();
-        detectedLinePaint.setColor(Color.YELLOW);
-        detectedLinePaint.setStyle(Paint.Style.STROKE);
-        detectedLinePaint.setStrokeWidth(8);
 
         detectedLinePaintError = new Paint();
         detectedLinePaintError.setColor(Color.RED);
@@ -102,83 +105,45 @@ public class LineTrackingFragment extends CameraFragment {
         // Initialize OpenCV Mats
         mat = new Mat();
         matGray = new Mat();
-        matCanny = new Mat();
+        matHsv = new Mat();
+        matMask = new Mat();
+        matSlice = new Mat();
+        matHist = new Mat();
 
         // Autopilot Switch
         binding.autoSwitch.setChecked(isAutoMode);
         binding.autoSwitch.setOnClickListener(v -> setAutoMode(binding.autoSwitch.isChecked()));
 
-        // ROI Width Slider
-        binding.roiWidthText.setText(roiWidthPercent + "%");
-        binding.roiWidthSeekbar.setProgress(roiWidthPercent);
-        binding.roiWidthSeekbar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+        // --- Link Scan Y Slider ---
+        binding.scanYText.setText(String.valueOf(scanY));
+        binding.scanYSeekbar.setProgress(scanY);
+        binding.scanYSeekbar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
-                    roiWidthPercent = progress;
-                    binding.roiWidthText.setText(progress + "%");
+                    scanY = progress;
+                    binding.scanYText.setText(String.valueOf(progress));
                 }
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
 
-        // Angle Tolerance Slider
-        binding.angleToleranceText.setText("±" + angleTolerance + "°");
-        binding.angleToleranceSeekbar.setProgress(angleTolerance);
-        binding.angleToleranceSeekbar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+        // --- Link Scan Height Slider ---
+        binding.scanHeightText.setText(String.valueOf(scanHeight));
+        binding.scanHeightSeekbar.setProgress(scanHeight);
+        binding.scanHeightSeekbar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (fromUser) {
-                    angleTolerance = progress;
-                    binding.angleToleranceText.setText("±" + progress + "°");
+                    scanHeight = progress;
+                    binding.scanHeightText.setText(String.valueOf(progress));
                 }
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
 
-        binding.cannyStartInput.setText(String.valueOf(cannyStart));
-        binding.cannyEndInput.setText(String.valueOf(cannyEnd));
-
-        binding.cannyStartInput.addTextChangedListener(new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence charSequence, int i, int i1, int i2) {
-
-            }
-
-            @Override
-            public void onTextChanged(CharSequence charSequence, int i, int i1, int i2) {
-
-            }
-
-            @Override
-            public void afterTextChanged(Editable editable) {
-                try {
-                    int value = Integer.parseInt(editable.toString());
-                    if (value < 0) value = 0;
-                    cannyStart = value;
-                } catch (NumberFormatException e) {
-                    cannyStart = 0; // Default to 0 if empty/invalid
-                }
-            }
-        });
-
-        binding.cannyEndInput.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
-
-            @Override
-            public void afterTextChanged(Editable s) {
-                try {
-                    int value = Integer.parseInt(s.toString());
-                    if (value < 0) value = 0;
-                    cannyEnd = value;
-                } catch (NumberFormatException e) {
-                    cannyEnd = 0; // Default to 0 if empty/invalid
-                }
-            }
-        });
 
         rotationMatrix = new Matrix();
         rotationMatrix.postRotate(90);
@@ -189,7 +154,6 @@ public class LineTrackingFragment extends CameraFragment {
         binding.autoSwitch.setChecked(isEnabled);
         if (!isAutoMode) {
             vehicle.setControl(new Control(0.0f, 0.0f));
-            // Reset UI when turning off
             if (getActivity() != null) {
                 getActivity().runOnUiThread(() -> {
                     if (binding != null) {
@@ -208,130 +172,124 @@ public class LineTrackingFragment extends CameraFragment {
             return;
         }
 
-        // --- 1. ROTATE THE BITMAP FIRST (Your Idea) ---
-        // Create the rotated bitmap from the original image
+        // --- 1. ROTATE THE BITMAP ---
         rotatedBitmap = Bitmap.createBitmap(image, 0, 0, image.getWidth(), image.getHeight(), rotationMatrix, true);
 
-
         // --- 2. Initialize Overlay Canvas ---
-        // Create an overlay that matches the new *rotated* bitmap
         if (overlayBitmap == null || overlayBitmap.getWidth() != rotatedBitmap.getWidth() || overlayBitmap.getHeight() != rotatedBitmap.getHeight()) {
             overlayBitmap = Bitmap.createBitmap(rotatedBitmap.getWidth(), rotatedBitmap.getHeight(), Bitmap.Config.ARGB_8888);
             overlayCanvas = new Canvas(overlayBitmap);
         }
         overlayCanvas.drawColor(Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR);
 
-        // --- 3. Define ROI (on the rotated 480x640 image) ---
-        int w = rotatedBitmap.getWidth();
+        // --- 3. Define Scan Area (on the rotated 480x640 image) ---
+        int w = rotatedBitmap.getWidth();  // e.g., 480
         int h = rotatedBitmap.getHeight(); // e.g., 640
-        Log.d(TAG, String.valueOf(w) + " " + String.valueOf(h));
-        int roiWidth = w * roiWidthPercent / 100;
-        int roiLeft = (w - roiWidth) / 2;
-        Rect roiRect = new Rect(roiLeft, 0, roiLeft + roiWidth, h);
 
-        // Draw ROI lines on overlay
-        overlayCanvas.drawRect(roiRect, roiPaint);
-
-        // Draw Robot Direction line on overlay
+        // targetPixel is no longer needed, we just use the center (w / 2)
         float centerX = w / 2.0f;
+
+        if (scanY + scanHeight > h) scanY = h - scanHeight;
+        if (scanY < 0) scanY = 0;
+
+        Rect roiRect = new Rect(0, scanY, w, scanY + scanHeight);
+        overlayCanvas.drawRect(roiRect, roiPaint);
         overlayCanvas.drawLine(centerX, 0, centerX, h, robotDirPaint);
 
-        // --- 4. OpenCV Processing ---
-        Utils.bitmapToMat(rotatedBitmap, mat); // Convert the *rotated* bitmap to Mat
+        // --- 4. OpenCV Processing (Color Tracking) ---
+        Utils.bitmapToMat(rotatedBitmap, mat);
+        matSlice = new Mat(mat, new org.opencv.core.Rect(roiRect.left, roiRect.top, roiRect.width(), roiRect.height()));
+        Imgproc.cvtColor(matSlice, matHsv, Imgproc.COLOR_RGB2HSV);
+        Core.inRange(matHsv, colorThrLow, colorThrHi, matMask);
+        Core.reduce(matMask, matHist, 0, Core.REDUCE_SUM, CvType.CV_32S);
 
-        // Crop to Region of Interest
-        Mat roiMat = new Mat(mat, new org.opencv.core.Rect(roiRect.left, roiRect.top, roiRect.width(), roiRect.height()));
+        // --- 5. Find Line Center ---
+        Core.MinMaxLocResult mmr = Core.minMaxLoc(matHist);
+        int maxYellowIdx = (int) mmr.maxLoc.x; // X-coordinate of the line center
+        double maxYellowVal = mmr.maxVal; // This is our "confidence"
 
-        // Convert to Grayscale
-        Imgproc.cvtColor(roiMat, matGray, Imgproc.COLOR_RGB2GRAY);
-
-        // Canny Edge Detection
-        Imgproc.Canny(matGray, matCanny, cannyStart, cannyEnd);
-
-        // Hough Line Transform
-        houghLines = new Mat();
-        Imgproc.HoughLinesP(matCanny, houghLines, 1, Math.PI / 180, 50, 50, 10);
-
-        // --- 5. Filter Lines & Calculate Average ---
-        double avgLineX = 0;
-        int lineCount = 0;
-
-        double minAngle = 90.0 - angleTolerance;
-        double maxAngle = 90.0 + angleTolerance;
-
-        for (int i = 0; i < houghLines.rows(); i++) {
-            double[] line = houghLines.get(i, 0);
-            double x1 = line[0], y1 = line[1], x2 = line[2], y2 = line[3];
-
-            double angle = Math.abs(Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI);
-
-            if (angle > minAngle && angle < maxAngle) {
-                lineCount++;
-                avgLineX += (x1 + x2) / 2.0;
-
-                // Draw the line on the overlay (relative to ROI)
-                overlayCanvas.drawLine((float)(roiRect.left + x1), (float)y1, (float)(roiRect.left + x2), (float)y2, detectedLinePaint);
-            }
-        }
-
-        // --- 6. Calculate Error and Steer ---
         Control driveCommand;
-        double error = 0;
+        float leftControl = 0.0f;
+        float rightControl = 0.0f;
 
-        if (lineCount > 0) {
-            // Find the average X position of the "good" lines
-            double finalAvgX = avgLineX / lineCount;
-            // Get the X position *relative to the full screen*
-            double detectedLineScreenX = roiRect.left + finalAvgX;
+        if (maxYellowVal > CONFIDENCE_THRESHOLD) {
+            // We see the line.
 
-            // Calculate error: difference between detected line and robot's center
-            error = detectedLineScreenX - centerX;
+            // 1. Normalize the line's position to a -1.0 to +1.0 scale
+            float x_pos_norm = 1.0f - 2.0f * maxYellowIdx / w;
 
-            // Draw the final "average" detected line
-            overlayCanvas.drawLine((float)detectedLineScreenX, 0, (float)detectedLineScreenX, h, detectedLinePaintError);
+            // --- NEW: NON-LINEAR STEERING ---
+            // Apply an exponent to the error.
+            // A higher number = more sensitive at the edges, less sensitive at the center.
+            // (Must be an odd number to keep the sign correct, e.g., 3, 5)
+            float sensitivity = 3.0f; // TUNE THIS. 1.0 is linear. 3.0 is very curved.
+            float x_pos_scaled = (float) (Math.signum(x_pos_norm) * Math.pow(Math.abs(x_pos_norm), sensitivity));
+            // --- END NEW LOGIC ---
 
-            // Steering Logic (P-Controller)
-            final double STEERING_SENSITIVITY = 0.5;
-            float turn = (float)(error / (w / 2.0)) * (float)STEERING_SENSITIVITY;
 
-            float speed = 1.0f; // Autonomous speed scale
-            float left = speed - turn;
-            float right = speed + turn;
+            // 2. Apply "tank steer" logic using the NEW scaled value
+            if (x_pos_scaled < 0) {
+                // Line is to the RIGHT (negative norm)
+                leftControl = 1.0f;
+                rightControl = 1.0f + x_pos_scaled; // x_pos_scaled is negative
+            } else {
+                // Line is to the LEFT (positive norm)
+                leftControl = 1.0f - x_pos_scaled; // x_pos_scaled is positive
+                rightControl = 1.0f;
+            }
 
-            left = Math.max(-1.0f, Math.min(1.0f, left));
-            right = Math.max(-1.0f, Math.min(1.0f, right));
+            // (Optional) Apply dynamic speed
+            float speed = 1.0f;
+            leftControl *= speed;
+            rightControl *= speed;
 
-            driveCommand = new Control(left, right);
+            // Draw the detected line center on our overlay
+            overlayCanvas.drawLine((float) maxYellowIdx, (float) scanY, (float) maxYellowIdx, (float) (scanY + scanHeight), detectedLinePaintError);
+
+            // Set the final command
+            driveCommand = new Control(leftControl, rightControl);
+
+            // Update error text for debugging (show the scaled error)
+            if (getActivity() != null) {
+                final float finalError = x_pos_scaled;
+                getActivity().runOnUiThread(() -> {
+                    if (binding != null) {
+                        binding.errorText.setText(String.format(Locale.US, "Error: %.2f", finalError));
+                    }
+                });
+            }
 
         } else {
-            // No lines detected: STOP
+            // --- LINE LOST! ---
+            // (Same as before)
             driveCommand = new Control(0.0f, 0.0f);
+            if (getActivity() != null) {
+                getActivity().runOnUiThread(() -> {
+                    if (binding != null) {
+                        binding.errorText.setText("Line Lost");
+                    }
+                });
+            }
         }
 
         // --- 7. Update UI and Send Command ---
         vehicle.setControl(driveCommand);
 
         if (getActivity() != null) {
+            // Get the actual speeds sent to the vehicle
             float left = vehicle.getLeftSpeed();
             float right = vehicle.getRightSpeed();
-            final double finalError = error;
 
             getActivity().runOnUiThread(() -> {
                 if (binding != null) {
-                    binding.errorText.setText(String.format(Locale.US, "Error: %.0f", finalError));
                     binding.controllerContainer.controlInfo.setText(
                             String.format(Locale.US, "%.0f,%.0f", left, right));
-
-                    // IMPORTANT: Set the overlay image, not the raw camera image
                     binding.overlayImageView.setImageBitmap(overlayBitmap);
                 }
             });
         }
-
-        // Release Mats to prevent memory leaks
-        roiMat.release();
-        houghLines.release();
     }
+
     @Override
     protected void processUSBData(String data) {
         if (binding != null && binding.controllerContainer != null) {
@@ -356,11 +314,12 @@ public class LineTrackingFragment extends CameraFragment {
     @Override
     public void onDestroyView() {
         super.onDestroyView();
-        // Release OpenCV Mats when view is destroyed
         if (mat != null) mat.release();
         if (matGray != null) matGray.release();
-        if (matCanny != null) matCanny.release();
-
-        binding = null; // Clean up binding
+        if (matHsv != null) matHsv.release();
+        if (matMask != null) matMask.release();
+        if (matSlice != null) matSlice.release();
+        if (matHist != null) matHist.release();
+        binding = null;
     }
 }

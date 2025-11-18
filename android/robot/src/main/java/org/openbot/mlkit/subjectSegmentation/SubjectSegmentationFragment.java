@@ -3,12 +3,12 @@ package org.openbot.mlkit.subjectSegmentation;
 import android.graphics.Bitmap;
 import android.graphics.Matrix;
 import android.os.Bundle;
-// import android.os.SystemClock; // No longer needed
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.SeekBar; // IMPORT THIS
+import android.widget.SeekBar;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -19,7 +19,7 @@ import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation;
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmenter;
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions;
 
-import org.openbot.R; // IMPORT THIS
+import org.openbot.R;
 import org.openbot.common.CameraFragment;
 import org.openbot.databinding.FragmentSubjectSegmentationBinding;
 import org.openbot.utils.Constants;
@@ -29,12 +29,14 @@ import org.openbot.vehicle.Control;
 import java.util.Locale;
 import java.util.Random;
 
+
 public class SubjectSegmentationFragment extends CameraFragment {
     private String TAG = "SubjectSegmentationFragment";
 
     private SubjectSegmenter segmenter;
+    private boolean isProcessing = false;
     private FragmentSubjectSegmentationBinding binding;
-    private SubjectSegmenterOptions segmenterOptions; // Make this a class variable
+    private SubjectSegmenterOptions segmenterOptions;
 
     // --- NEW VARIABLES ---
     private int closenessThreshold = 20;
@@ -62,7 +64,7 @@ public class SubjectSegmentationFragment extends CameraFragment {
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
-
+        Log.d(TAG, String.valueOf(getRotationDegrees()));
         // Build the options, but don't create the client yet
         segmenterOptions = new SubjectSegmenterOptions.Builder()
                 .enableForegroundBitmap()
@@ -174,141 +176,154 @@ public class SubjectSegmentationFragment extends CameraFragment {
 
     @Override
     protected void processFrame(Bitmap image, ImageProxy imageProxy) {
-        // --- ADDED NULL CHECKS AND AUTOPILOT CHECK ---
+        // 1. Basic Null Checks
         if (segmenter == null || image == null || binding == null) {
             return;
         }
 
-        // If Autopilot is OFF, do nothing.
-        // This allows manual controller drive to work.
+        // 2. Auto Mode Check
         if (!isAutoMode) {
-            // We should also clear the mask
             if (binding.maskImageView.getDrawable() != null) {
                 getActivity().runOnUiThread(() -> binding.maskImageView.setImageBitmap(null));
             }
             return;
         }
-        // ---------------------------------------------
+
+        // 3. [CRITICAL FIX] Busy Check
+        // If the AI is still busy with the previous frame, DROP this one completely.
+        // This prevents the "queue" from building up and causing the time to add up.
+        if (isProcessing) {
+            return;
+        }
+
+        // 4. Lock the flag and start timer
+        isProcessing = true;
+        final long startTime = SystemClock.elapsedRealtime();
 
         int rotation = getRotationDegrees();
         InputImage inputImage = InputImage.fromBitmap(image, rotation);
 
-        // final long startTime = SystemClock.elapsedRealtime(); // Removed
-
         segmenter.process(inputImage)
-                .addOnSuccessListener(
-                        result -> {
-                            // Check if binding is null (fragment is gone) or if auto-mode was turned off
-                            if (binding == null || getActivity() == null || !isAutoMode) {
-                                return;
-                            }
+                .addOnSuccessListener(result -> {
+                    // 5. [FIX] Unlock the flag immediately
+                    isProcessing = false;
 
-                            Bitmap foregroundMask = result.getForegroundBitmap();
+                    if (binding == null || getActivity() == null || !isAutoMode) {
+                        return;
+                    }
 
-                            // lastProcessingTimeMs = SystemClock.elapsedRealtime() - startTime; // Removed
+                    // Calculate PURE inference time (no waiting time)
+                    long inferenceTime = SystemClock.elapsedRealtime() - startTime;
 
-                            if (foregroundMask == null) {
-                                // No object detected, so GO FORWARD
-                                vehicle.setControl(new Control(1.0f, 1.0f));
-                                // Clear the mask
-                                getActivity().runOnUiThread(() -> binding.maskImageView.setImageBitmap(null));
-                                return;
-                            }
+                    Bitmap foregroundMask = result.getForegroundBitmap();
 
-                            // --- 1. AREA CALCULATION ---
-                            int width = foregroundMask.getWidth();
-                            int height = foregroundMask.getHeight();
-                            long totalCameraArea = (long) width * height;
-                            long foregroundAreaInPixels = 0;
-
-                            int[] pixels = new int[width * height];
-                            foregroundMask.getPixels(pixels, 0, width, 0, 0, width, height);
-
-                            for (int pixel : pixels) {
-                                if (android.graphics.Color.alpha(pixel) > 0) {
-                                    foregroundAreaInPixels++;
-                                }
-                            }
-                            double areaPercentage = 0.0;
-                            if (totalCameraArea > 0) {
-                                areaPercentage = (foregroundAreaInPixels / (double) totalCameraArea) * 100.0;
-                            }
-                            Log.d(TAG, String.format("Object covers: %.2f%% (Threshold: %d%%)", areaPercentage, closenessThreshold));
-
-                            // --- 2. AUTOPILOT LOGIC & COLOR ---
-                            int maskColor;
-                            Control driveCommand;
-                            final float STOP_THRESHOLD = closenessThreshold;
-
-                            int newZone = 0; // 0=FAR
-                            if (areaPercentage >= STOP_THRESHOLD) {
-                                newZone = 1; // ROTATE
-                            }
-
-                            if (newZone != currentZone &&  newZone == 1) {
-                                isTurningRight = random.nextBoolean();
-                                Log.d(TAG, "New turn decision: " + (isTurningRight ? "RIGHT" : "LEFT"));
-                            }
-
-                            currentZone = newZone;
-
-                            switch (currentZone) {
-                                case 1: // ROTATE
-                                    if (isTurningRight) {
-                                        driveCommand = new Control(AUTONOMOUS_SPEED_SCALE, -AUTONOMOUS_SPEED_SCALE); // Turn Right
-                                    } else {
-                                        driveCommand = new Control(-AUTONOMOUS_SPEED_SCALE, AUTONOMOUS_SPEED_SCALE); // Turn Left
-                                    }
-                                    maskColor = android.graphics.Color.argb(150, 255, 255, 0); // YELLOW
-                                    break;
-                                case 0: // FAR
-                                default:
-                                    driveCommand = new Control(AUTONOMOUS_SPEED_SCALE* 0.5f, AUTONOMOUS_SPEED_SCALE* 0.5f);
-                                    maskColor = android.graphics.Color.argb(150, 255, 0, 0); // RED
-                                    break;
-                            }
-
-                            vehicle.setControl(driveCommand);
-
-                            if (getActivity() != null) {
-                                float left = vehicle.getLeftSpeed();
-                                float right = vehicle.getRightSpeed();
-                                Log.d(TAG, String.valueOf(left) + " " + String.valueOf(right));
-                                getActivity().runOnUiThread(() -> {
-                                    if (binding != null && binding.controllerContainer != null) {
-                                        binding.controllerContainer.controlInfo.setText(
-                                                String.format(Locale.US, "%.0f,%.0f", left, right));
-                                    }
-                                });
-                            }
-                            // ----------------------------------
-
-                            // --- 3. ROTATE FOR DISPLAY ---
-                            Matrix matrix = new Matrix();
-                            matrix.postRotate(90);
-                            Bitmap rotatedMask = Bitmap.createBitmap(
-                                    foregroundMask, 0, 0,
-                                    foregroundMask.getWidth(), foregroundMask.getHeight(),
-                                    matrix, true
-                            );
-
-                            // --- 4. UPDATE UI ---
-                            getActivity().runOnUiThread(() -> {
-                                if (binding != null) {
-                                    binding.maskImageView.setImageBitmap(rotatedMask);
-                                    binding.maskImageView.setColorFilter(
-                                            maskColor,
-                                            android.graphics.PorterDuff.Mode.SRC_IN
-                                    );
-                                }
-                            });
-                        })
-                .addOnFailureListener(
-                        e -> {
-                            if (binding != null) {
-                                Log.e(TAG, "Segmentation failed", e);
+                    if (foregroundMask == null) {
+                        vehicle.setControl(new Control(1.0f, 1.0f));
+                        getActivity().runOnUiThread(() -> {
+                            if(binding != null) {
+                                binding.maskImageView.setImageBitmap(null);
+                                // Update text even if no object found
+                                binding.inferenceInfo.setText(inferenceTime + " ms");
                             }
                         });
+                        return;
+                    }
+
+                    // --- YOUR EXISTING LOGIC STARTS HERE ---
+
+                    // ... (Area Calculation) ...
+                    int width = foregroundMask.getWidth();
+                    int height = foregroundMask.getHeight();
+                    long totalCameraArea = (long) width * height;
+                    long foregroundAreaInPixels = 0;
+
+                    int[] pixels = new int[width * height];
+                    foregroundMask.getPixels(pixels, 0, width, 0, 0, width, height);
+
+                    for (int pixel : pixels) {
+                        if (android.graphics.Color.alpha(pixel) > 0) {
+                            foregroundAreaInPixels++;
+                        }
+                    }
+                    double areaPercentage = 0.0;
+                    if (totalCameraArea > 0) {
+                        areaPercentage = (foregroundAreaInPixels / (double) totalCameraArea) * 100.0;
+                    }
+                    Log.d(TAG, String.format("Object covers: %.2f%%", areaPercentage));
+
+                    // ... (Autopilot Logic) ...
+                    int maskColor;
+                    Control driveCommand;
+                    final float STOP_THRESHOLD = closenessThreshold;
+
+                    int newZone = 0; // 0=FAR
+                    if (areaPercentage >= STOP_THRESHOLD) {
+                        newZone = 1; // ROTATE
+                    }
+
+                    if (newZone != currentZone &&  newZone == 1) {
+                        isTurningRight = random.nextBoolean();
+                    }
+                    currentZone = newZone;
+
+                    switch (currentZone) {
+                        case 1: // ROTATE
+                            if (isTurningRight) {
+                                driveCommand = new Control(AUTONOMOUS_SPEED_SCALE, -AUTONOMOUS_SPEED_SCALE);
+                            } else {
+                                driveCommand = new Control(-AUTONOMOUS_SPEED_SCALE, AUTONOMOUS_SPEED_SCALE);
+                            }
+                            maskColor = android.graphics.Color.argb(150, 255, 255, 0);
+                            break;
+                        case 0: // FAR
+                        default:
+                            driveCommand = new Control(AUTONOMOUS_SPEED_SCALE* 0.5f, AUTONOMOUS_SPEED_SCALE* 0.5f);
+                            maskColor = android.graphics.Color.argb(150, 255, 0, 0);
+                            break;
+                    }
+                    vehicle.setControl(driveCommand);
+
+                    // Update Speed Info on UI
+                    if (getActivity() != null) {
+                        float left = vehicle.getLeftSpeed();
+                        float right = vehicle.getRightSpeed();
+                        getActivity().runOnUiThread(() -> {
+                            if (binding != null && binding.controllerContainer != null) {
+                                binding.controllerContainer.controlInfo.setText(
+                                        String.format(Locale.US, "%.0f,%.0f", left, right));
+                            }
+                        });
+                    }
+
+                    // Rotate Mask for Display
+
+                    Matrix matrix = new Matrix();
+//                    if (getRotationDegrees() != 0) {
+//                        matrix.postRotate(90);
+//                    } else  {
+//                        matrix.postRotate(0);
+//                    }
+                    matrix.postRotate(90);
+                    Bitmap rotatedMask = Bitmap.createBitmap(
+                            foregroundMask, 0, 0,
+                            foregroundMask.getWidth(), foregroundMask.getHeight(),
+                            matrix, true
+                    );
+
+                    // Update Mask Image AND Time
+                    getActivity().runOnUiThread(() -> {
+                        if (binding != null) {
+                            binding.maskImageView.setImageBitmap(rotatedMask);
+                            binding.maskImageView.setColorFilter(maskColor, android.graphics.PorterDuff.Mode.SRC_IN);
+                            binding.inferenceInfo.setText(inferenceTime + " ms");
+                        }
+                    });
+                })
+                .addOnFailureListener(e -> {
+                    // 6. [FIX] VERY IMPORTANT: Unlock flag on failure too
+                    isProcessing = false;
+                    Log.e(TAG, "Segmentation failed", e);
+                });
     }
 
     @Override
