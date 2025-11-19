@@ -6,27 +6,23 @@
     android:layout_height="match_parent"
     tools:context=".mlkit.subjectSegmentation.SubjectSegmentationFragment">
 
-    <!-- This ImageView will display the segmented mask overlay. -->
-    <ImageView
-        android:id="@+id/mask_image_view"
+    <!-- THE OVERLAY -->
+    <org.openbot.customview.OverlayView
+        android:id="@+id/mask_overlay"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:contentDescription="Segmentation Mask"
-        android:scaleType="fitStart" />
+        android:layout_height="match_parent" />
 
-    <!--
-      This is the Bottom Sheet, styled just like your ObjectNavFragment.
-    -->
+    <!-- THE CONTROLS -->
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/bottom_sheet_controls"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="@drawable/bottom_sheet_bg"
         app:behavior_hideable="false"
-        app:behavior_peekHeight="48dp"
+        app:behavior_peekHeight="90dp"
         app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior">
 
-        <!-- The little grey "drag handle" -->
+        <!-- Drag Handle -->
         <View
             android:id="@+id/view"
             android:layout_width="48dp"
@@ -38,9 +34,7 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
 
-        <!--
-          NEW CONTROLS: Autopilot Switch and Speed Button
-        -->
+        <!-- TOP ROW: Autopilot Switch & Inference Info -->
         <LinearLayout
             android:id="@+id/auto_controls_layout"
             android:layout_width="match_parent"
@@ -57,7 +51,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:layout_marginStart="16dp"
+                android:layout_marginStart="8dp"
                 android:text="Autopilot"
                 android:textSize="18sp"/>
 
@@ -73,24 +67,50 @@
 
             <ImageView
                 android:id="@+id/speed_mode"
-                android:layout_width="60dp"
-                android:layout_height="60dp"
-                android:layout_marginEnd="16dp"
+                android:layout_width="50dp"
+                android:layout_height="50dp"
                 android:src="@drawable/ic_speed_medium"
                 android:background="?attr/selectableItemBackgroundBorderless"/>
         </LinearLayout>
 
-        <!--
-          CLOSENESS THRESHOLD CONTROLS
-        -->
+        <!-- NEW CONTROLS ROW: Camera Toggle & Mirror -->
+        <LinearLayout
+            android:id="@+id/camera_controls_layout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            app:layout_constraintTop_toBottomOf="@+id/auto_controls_layout">
+
+            <ImageView
+                android:id="@+id/camera_toggle"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="16dp"
+                android:background="@android:color/transparent"
+                android:scaleType="center"
+                android:src="@drawable/ic_cameraswitch"
+                app:tint="@color/openBotBlue" />
+
+            <CheckBox
+                android:id="@+id/mirrorControl"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Flip / Mirror"
+                android:textColor="@android:color/black"
+                android:button="@drawable/mirror_control" />
+        </LinearLayout>
+
+        <!-- THRESHOLD ROW -->
         <LinearLayout
             android:id="@+id/threshold_controls_layout"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:padding="16dp"
-            android:layout_marginTop="8dp"
-            app:layout_constraintTop_toBottomOf="@id/auto_controls_layout"
+            app:layout_constraintTop_toBottomOf="@id/camera_controls_layout"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent">
 
@@ -98,7 +118,6 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal">
-
                 <TextView
                     android:id="@+id/threshold_label"
                     android:layout_width="0dp"
@@ -107,7 +126,6 @@
                     android:text="Closeness Threshold:"
                     android:textColor="@android:color/black"
                     android:textSize="16sp" />
-
                 <TextView
                     android:id="@+id/threshold_value_text"
                     android:layout_width="wrap_content"
@@ -125,11 +143,11 @@
                 android:layout_marginTop="8dp"
                 android:max="100"
                 android:progress="20" />
+
             <include
                 android:id="@+id/controllerContainer"
                 layout="@layout/control_buttons" />
         </LinearLayout>
-
     </androidx.constraintlayout.widget.ConstraintLayout>
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
