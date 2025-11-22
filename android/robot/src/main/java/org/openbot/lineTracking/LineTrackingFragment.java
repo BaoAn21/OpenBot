@@ -23,7 +23,6 @@ import org.openbot.databinding.FragmentLineTrackingBinding;
 import org.openbot.utils.Constants;
 import org.openbot.vehicle.Control;
 
-// OpenCV Imports
 import org.opencv.android.Utils;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
@@ -42,35 +41,30 @@ public class LineTrackingFragment extends CameraFragment {
     // --- Processing and Drawing Variables ---
     private Bitmap overlayBitmap;
     private Canvas overlayCanvas;
-    private Paint roiPaint;
+    private Paint roiBorderPaint;
     private Paint robotDirPaint;
-    private Paint detectedLinePaintError;
+    private Paint detectedLinePaint;
 
-    // --- Color Tracking Variables ---
-    private int scanY = 480;
-    private int scanHeight = 20;
+    private Bitmap debugRoiBitmap;
 
-    // TUNE THIS: HSV Color Thresholds for the line (e.g., yellow)
-    private Scalar colorThrLow = new Scalar(20, 100, 100);  // Yellow
-    private Scalar colorThrHi = new Scalar(30, 255, 255); // Yellow
+    // --- Configuration ---
+    private int scanY = 300;
+    private int scanHeight = 30;
+    private boolean isMirrored = false; // Controlled by checkbox
 
-    private int targetPixel = 0;
+    // --- Thresholds ---
+    private Scalar colorThrLow = new Scalar(20, 100, 100);
+    private Scalar colorThrHi = new Scalar(30, 255, 255);
     private final double CONFIDENCE_THRESHOLD = 500;
 
-    // --- PID VARIABLES REMOVED ---
-    // No Kp, Ki, Kd, previousError, or integralError needed.
-
-    // --- OpenCV Mats ---
     private Mat mat;
-    private Mat matGray;
     private Mat matHsv;
     private Mat matMask;
     private Mat matSlice;
     private Mat matHist;
 
-    private Matrix rotationMatrix;
-    private Bitmap rotatedBitmap;
-
+    private Matrix transformMatrix;
+    private Bitmap processedBitmap;
 
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
@@ -82,71 +76,83 @@ public class LineTrackingFragment extends CameraFragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
-        Log.d(TAG, String.valueOf(getRotationDegrees()));
-
-        // Initialize Paint objects
-        roiPaint = new Paint();
-        roiPaint.setColor(Color.BLUE);
-        roiPaint.setStyle(Paint.Style.STROKE);
-        roiPaint.setStrokeWidth(3);
-        roiPaint.setAlpha(100);
+        // Initialize Paints
+        roiBorderPaint = new Paint();
+        roiBorderPaint.setColor(Color.YELLOW);
+        roiBorderPaint.setStyle(Paint.Style.STROKE);
+        roiBorderPaint.setStrokeWidth(5);
 
         robotDirPaint = new Paint();
         robotDirPaint.setColor(Color.GREEN);
         robotDirPaint.setStyle(Paint.Style.STROKE);
         robotDirPaint.setStrokeWidth(5);
-        robotDirPaint.setPathEffect(new android.graphics.DashPathEffect(new float[]{10, 10}, 0));
 
-        detectedLinePaintError = new Paint();
-        detectedLinePaintError.setColor(Color.RED);
-        detectedLinePaintError.setStyle(Paint.Style.STROKE);
-        detectedLinePaintError.setStrokeWidth(8);
+        detectedLinePaint = new Paint();
+        detectedLinePaint.setColor(Color.RED);
+        detectedLinePaint.setStyle(Paint.Style.FILL);
 
         // Initialize OpenCV Mats
         mat = new Mat();
-        matGray = new Mat();
         matHsv = new Mat();
         matMask = new Mat();
         matSlice = new Mat();
         matHist = new Mat();
 
-        // Autopilot Switch
+        // --- UI CONTROLS ---
+
         binding.autoSwitch.setChecked(isAutoMode);
         binding.autoSwitch.setOnClickListener(v -> setAutoMode(binding.autoSwitch.isChecked()));
 
-        // --- Link Scan Y Slider ---
+        // Color Selector
+        binding.colorSelectorGroup.setOnCheckedChangeListener((group, checkedId) -> {
+            if (checkedId == R.id.rb_yellow) {
+                colorThrLow = new Scalar(20, 100, 100);
+                colorThrHi = new Scalar(30, 255, 255);
+            } else if (checkedId == R.id.rb_white) {
+                colorThrLow = new Scalar(0, 0, 200);
+                colorThrHi = new Scalar(180, 50, 255);
+            } else if (checkedId == R.id.rb_black) {
+                colorThrLow = new Scalar(0, 0, 0);
+                colorThrHi = new Scalar(180, 255, 50);
+            }
+        });
+
+        // Camera Toggle
+        binding.cameraToggle.setOnClickListener(v -> {
+            toggleCamera();
+            transformMatrix = null; // Force matrix rebuild
+        });
+
+        // Mirror/Flip Toggle
+        binding.mirrorControl.setOnClickListener(v -> {
+            isMirrored = binding.mirrorControl.isChecked();
+            transformMatrix = null; // Force matrix rebuild with new flip state
+        });
+
+        // Sliders
         binding.scanYText.setText(String.valueOf(scanY));
         binding.scanYSeekbar.setProgress(scanY);
         binding.scanYSeekbar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser) {
-                    scanY = progress;
-                    binding.scanYText.setText(String.valueOf(progress));
-                }
+                scanY = progress;
+                binding.scanYText.setText(String.valueOf(progress));
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
 
-        // --- Link Scan Height Slider ---
         binding.scanHeightText.setText(String.valueOf(scanHeight));
         binding.scanHeightSeekbar.setProgress(scanHeight);
         binding.scanHeightSeekbar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser) {
-                    scanHeight = progress;
-                    binding.scanHeightText.setText(String.valueOf(progress));
-                }
+                scanHeight = progress;
+                binding.scanHeightText.setText(String.valueOf(progress));
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
-
-
-        rotationMatrix = new Matrix();
-        rotationMatrix.postRotate(90);
     }
 
     private void setAutoMode(boolean isEnabled) {
@@ -157,7 +163,7 @@ public class LineTrackingFragment extends CameraFragment {
             if (getActivity() != null) {
                 getActivity().runOnUiThread(() -> {
                     if (binding != null) {
-                        binding.errorText.setText("");
+                        binding.errorText.setText("Stopped");
                         binding.controllerContainer.controlInfo.setText("0,0");
                         binding.overlayImageView.setImageBitmap(null);
                     }
@@ -168,154 +174,122 @@ public class LineTrackingFragment extends CameraFragment {
 
     @Override
     protected void processFrame(Bitmap image, ImageProxy imageProxy) {
-        if (binding == null || !isAutoMode) {
-            return;
+        if (binding == null || !isAutoMode) return;
+
+        // 1. ROTATION & MIRRORING
+        if (transformMatrix == null) {
+            transformMatrix = new Matrix();
+            // Rotate based on camera sensor
+            transformMatrix.postRotate(getRotationDegrees());
+
+            // Apply Mirror if checkbox is checked
+            if (isMirrored) {
+                transformMatrix.postScale(-1, 1);
+            }
         }
 
-        // --- 1. ROTATE THE BITMAP ---
-        rotatedBitmap = Bitmap.createBitmap(image, 0, 0, image.getWidth(), image.getHeight(), rotationMatrix, true);
+        // Create the processed bitmap (Rotated + Mirrored)
+        // This image is exactly what we will draw to screen AND process with OpenCV
+        processedBitmap = Bitmap.createBitmap(image, 0, 0, image.getWidth(), image.getHeight(), transformMatrix, true);
 
-        // --- 2. Initialize Overlay Canvas ---
-        if (overlayBitmap == null || overlayBitmap.getWidth() != rotatedBitmap.getWidth() || overlayBitmap.getHeight() != rotatedBitmap.getHeight()) {
-            overlayBitmap = Bitmap.createBitmap(rotatedBitmap.getWidth(), rotatedBitmap.getHeight(), Bitmap.Config.ARGB_8888);
+        // 2. PREPARE OVERLAY CANVAS
+        if (overlayBitmap == null || overlayBitmap.getWidth() != processedBitmap.getWidth() || overlayBitmap.getHeight() != processedBitmap.getHeight()) {
+            overlayBitmap = Bitmap.createBitmap(processedBitmap.getWidth(), processedBitmap.getHeight(), Bitmap.Config.ARGB_8888);
             overlayCanvas = new Canvas(overlayBitmap);
         }
         overlayCanvas.drawColor(Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR);
 
-        // --- 3. Define Scan Area (on the rotated 480x640 image) ---
-        int w = rotatedBitmap.getWidth();  // e.g., 480
-        int h = rotatedBitmap.getHeight(); // e.g., 640
-
-        // targetPixel is no longer needed, we just use the center (w / 2)
-        float centerX = w / 2.0f;
+        // 3. DEFINE ROI
+        int w = processedBitmap.getWidth();
+        int h = processedBitmap.getHeight();
 
         if (scanY + scanHeight > h) scanY = h - scanHeight;
         if (scanY < 0) scanY = 0;
 
         Rect roiRect = new Rect(0, scanY, w, scanY + scanHeight);
-        overlayCanvas.drawRect(roiRect, roiPaint);
-        overlayCanvas.drawLine(centerX, 0, centerX, h, robotDirPaint);
 
-        // --- 4. OpenCV Processing (Color Tracking) ---
-        Utils.bitmapToMat(rotatedBitmap, mat);
+        // 4. OPENCV PROCESSING
+        Utils.bitmapToMat(processedBitmap, mat);
         matSlice = new Mat(mat, new org.opencv.core.Rect(roiRect.left, roiRect.top, roiRect.width(), roiRect.height()));
         Imgproc.cvtColor(matSlice, matHsv, Imgproc.COLOR_RGB2HSV);
         Core.inRange(matHsv, colorThrLow, colorThrHi, matMask);
-        Core.reduce(matMask, matHist, 0, Core.REDUCE_SUM, CvType.CV_32S);
 
-        // --- 5. Find Line Center ---
+        // --- VISUAL DEBUGGING ---
+        if (debugRoiBitmap == null || debugRoiBitmap.getWidth() != matMask.width() || debugRoiBitmap.getHeight() != matMask.height()) {
+            debugRoiBitmap = Bitmap.createBitmap(matMask.width(), matMask.height(), Bitmap.Config.ARGB_8888);
+        }
+        Utils.matToBitmap(matMask, debugRoiBitmap);
+        overlayCanvas.drawBitmap(debugRoiBitmap, null, roiRect, null);
+        overlayCanvas.drawRect(roiRect, roiBorderPaint);
+
+        // 5. CALCULATE LINE POSITION
+        Core.reduce(matMask, matHist, 0, Core.REDUCE_SUM, CvType.CV_32S);
         Core.MinMaxLocResult mmr = Core.minMaxLoc(matHist);
-        int maxYellowIdx = (int) mmr.maxLoc.x; // X-coordinate of the line center
-        double maxYellowVal = mmr.maxVal; // This is our "confidence"
+        double maxVal = mmr.maxVal;
+        int maxIdx = (int) mmr.maxLoc.x;
 
         Control driveCommand;
-        float leftControl = 0.0f;
-        float rightControl = 0.0f;
+        float error = 0.0f;
 
-        if (maxYellowVal > CONFIDENCE_THRESHOLD) {
-            // We see the line.
+        if (maxVal > CONFIDENCE_THRESHOLD) {
+            // LINE FOUND
+            float lineCenterX = (float) maxIdx;
+            float lineCenterY = scanY + (scanHeight / 2.0f);
+            overlayCanvas.drawCircle(lineCenterX, lineCenterY, 15, detectedLinePaint);
 
-            // 1. Normalize the line's position to a -1.0 to +1.0 scale
-            float x_pos_norm = 1.0f - 2.0f * maxYellowIdx / w;
+            float centerX = w / 2.0f;
+            error = (lineCenterX - centerX) / (w / 2.0f);
 
-            // --- NEW: NON-LINEAR STEERING ---
-            // Apply an exponent to the error.
-            // A higher number = more sensitive at the edges, less sensitive at the center.
-            // (Must be an odd number to keep the sign correct, e.g., 3, 5)
-            float sensitivity = 3.0f; // TUNE THIS. 1.0 is linear. 3.0 is very curved.
-            float x_pos_scaled = (float) (Math.signum(x_pos_norm) * Math.pow(Math.abs(x_pos_norm), sensitivity));
-            // --- END NEW LOGIC ---
+            float turn = error * 1.5f;
+            float leftSpeed = 0.8f + turn;
+            float rightSpeed = 0.8f - turn;
 
+            leftSpeed = Math.max(-1.0f, Math.min(1.0f, leftSpeed));
+            rightSpeed = Math.max(-1.0f, Math.min(1.0f, rightSpeed));
 
-            // 2. Apply "tank steer" logic using the NEW scaled value
-            if (x_pos_scaled < 0) {
-                // Line is to the RIGHT (negative norm)
-                leftControl = 1.0f;
-                rightControl = 1.0f + x_pos_scaled; // x_pos_scaled is negative
-            } else {
-                // Line is to the LEFT (positive norm)
-                leftControl = 1.0f - x_pos_scaled; // x_pos_scaled is positive
-                rightControl = 1.0f;
-            }
+            driveCommand = new Control(leftSpeed, rightSpeed);
 
-            // (Optional) Apply dynamic speed
-            float speed = 1.0f;
-            leftControl *= speed;
-            rightControl *= speed;
-
-            // Draw the detected line center on our overlay
-            overlayCanvas.drawLine((float) maxYellowIdx, (float) scanY, (float) maxYellowIdx, (float) (scanY + scanHeight), detectedLinePaintError);
-
-            // Set the final command
-            driveCommand = new Control(leftControl, rightControl);
-
-            // Update error text for debugging (show the scaled error)
-            if (getActivity() != null) {
-                final float finalError = x_pos_scaled;
-                getActivity().runOnUiThread(() -> {
-                    if (binding != null) {
-                        binding.errorText.setText(String.format(Locale.US, "Error: %.2f", finalError));
-                    }
-                });
-            }
+            robotDirPaint.setColor(Color.GREEN);
+            overlayCanvas.drawLine(centerX, lineCenterY, lineCenterX, lineCenterY, robotDirPaint);
 
         } else {
-            // --- LINE LOST! ---
-            // (Same as before)
+            // LINE LOST
             driveCommand = new Control(0.0f, 0.0f);
-            if (getActivity() != null) {
-                getActivity().runOnUiThread(() -> {
-                    if (binding != null) {
-                        binding.errorText.setText("Line Lost");
-                    }
-                });
-            }
+            robotDirPaint.setColor(Color.RED);
+            overlayCanvas.drawLine(w/2f, scanY, w/2f, scanY+scanHeight, robotDirPaint);
         }
 
-        // --- 7. Update UI and Send Command ---
         vehicle.setControl(driveCommand);
 
         if (getActivity() != null) {
-            // Get the actual speeds sent to the vehicle
-            float left = vehicle.getLeftSpeed();
-            float right = vehicle.getRightSpeed();
+            final float finalError = error;
+            float l = vehicle.getLeftSpeed();
+            float r = vehicle.getRightSpeed();
 
             getActivity().runOnUiThread(() -> {
                 if (binding != null) {
-                    binding.controllerContainer.controlInfo.setText(
-                            String.format(Locale.US, "%.0f,%.0f", left, right));
                     binding.overlayImageView.setImageBitmap(overlayBitmap);
+                    binding.errorText.setText(String.format(Locale.US, "Err: %.2f", finalError));
+                    binding.controllerContainer.controlInfo.setText(String.format(Locale.US, "%.1f,%.1f", l, r));
                 }
             });
         }
     }
 
     @Override
-    protected void processUSBData(String data) {
-        if (binding != null && binding.controllerContainer != null) {
-            binding.controllerContainer.speedInfo.setText(
-                    getString(
-                            R.string.speedInfo,
-                            String.format(
-                                    Locale.US, "%3.0f,%3.0f", vehicle.getLeftWheelRpm(), vehicle.getRightWheelRpm())));
+    protected void processControllerKeyData(String command) {
+        if (Constants.CMD_NETWORK.equals(command)) {
+            setAutoMode(!binding.autoSwitch.isChecked());
         }
     }
 
     @Override
-    protected void processControllerKeyData(String command) {
-        if (command == null || binding == null) return;
-        switch (command) {
-            case Constants.CMD_NETWORK: // Toggle autopilot
-                setAutoMode(!binding.autoSwitch.isChecked());
-                break;
-        }
-    }
+    protected void processUSBData(String data) {}
 
     @Override
     public void onDestroyView() {
         super.onDestroyView();
         if (mat != null) mat.release();
-        if (matGray != null) matGray.release();
         if (matHsv != null) matHsv.release();
         if (matMask != null) matMask.release();
         if (matSlice != null) matSlice.release();

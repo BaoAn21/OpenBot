@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".mileStone.LineObjectFragment">
+
+    <!-- 1. MAIN VIEW: LINE TRACKING VISUALIZATION -->
+    <ImageView
+        android:id="@+id/line_tracking_main_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="fitCenter"
+        android:contentDescription="Line Tracking View" />
+
+    <!-- 2. PIP VIEW: SAFETY MASK OVERLAY (Top Right) -->
+    <FrameLayout
+        android:layout_width="160dp"
+        android:layout_height="120dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="16dp"
+        android:background="#80000000"
+        android:padding="2dp">
+
+        <org.openbot.customview.OverlayView
+            android:id="@+id/safety_pip_view"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:text="Safety Cam"
+            android:textColor="#FFFFFF"
+            android:textSize="10sp"/>
+    </FrameLayout>
+
+    <!-- 3. STATUS TEXT (Center Screen) -->
+    <TextView
+        android:id="@+id/status_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="STOPPED"
+        android:textColor="#FF0000"
+        android:textSize="32sp"
+        android:textStyle="bold"
+        android:shadowColor="#000000"
+        android:shadowDx="2"
+        android:shadowDy="2"
+        android:shadowRadius="4"/>
+
+    <!-- 4. CONTROLS (Bottom Sheet) -->
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/bottom_sheet_controls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bottom_sheet_bg"
+        app:behavior_hideable="false"
+        app:behavior_peekHeight="90dp"
+        app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior">
+
+        <!-- Drag Handle -->
+        <View
+            android:id="@+id/view"
+            android:layout_width="48dp"
+            android:layout_height="5dp"
+            android:layout_marginTop="16dp"
+            android:alpha="0.5"
+            android:background="@drawable/button_item_background_black"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <!-- MAIN CONTROLS ROW -->
+        <LinearLayout
+            android:id="@+id/main_controls"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="16dp"
+            android:gravity="center_vertical"
+            app:layout_constraintTop_toBottomOf="@id/view">
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/auto_switch"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Autopilot"
+                android:textSize="18sp"/>
+
+            <CheckBox
+                android:id="@+id/mirrorControl"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Flip Cam"
+                android:layout_marginEnd="8dp"/>
+
+            <ImageView
+                android:id="@+id/camera_toggle"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@drawable/ic_cameraswitch"
+                app:tint="@color/openBotBlue" />
+        </LinearLayout>
+
+        <!-- TUNING CONTROLS -->
+        <LinearLayout
+            android:id="@+id/tuning_layout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp"
+            app:layout_constraintTop_toBottomOf="@id/main_controls">
+
+            <!-- NEW: OBJECT PERCENTAGE DISPLAY -->
+            <TextView
+                android:id="@+id/object_percent_text"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Current Object Area: 0%"
+                android:textColor="@color/openBotBlue"
+                android:textStyle="bold"
+                android:textSize="18sp"
+                android:gravity="center_horizontal"
+                android:layout_marginBottom="8dp"/>
+
+            <!-- Stop Threshold Slider -->
+            <TextView
+                android:text="Stop Threshold (Max Area)"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@android:color/black"/>
+            <SeekBar
+                android:id="@+id/stop_threshold_seekbar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="100"
+                android:progress="20" />
+
+            <!-- Scan Y Slider -->
+            <TextView
+                android:text="Line Scan Y Position"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textColor="@android:color/black"/>
+            <SeekBar
+                android:id="@+id/scan_y_seekbar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="640"
+                android:progress="300" />
+
+            <!-- Scan Height Slider -->
+            <TextView
+                android:text="Scan Height (Thickness)"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textColor="@android:color/black"/>
+            <SeekBar
+                android:id="@+id/scan_height_seekbar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="100"
+                android:min="5"
+                android:progress="30" />
+
+            <!-- Color Selector -->
+            <TextView
+                android:text="Line Color"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textColor="@android:color/black"/>
+
+            <RadioGroup
+                android:id="@+id/color_selector_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <RadioButton
+                    android:id="@+id/rb_yellow"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:text="Yellow"
+                    android:checked="true"
+                    android:layout_weight="1"/>
+
+                <RadioButton
+                    android:id="@+id/rb_black"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:text="Black"
+                    android:layout_weight="1"/>
+
+                <RadioButton
+                    android:id="@+id/rb_white"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:text="White"
+                    android:layout_weight="1"/>
+            </RadioGroup>
+
+        </LinearLayout>
+
+        <!-- STANDARD CONTROL BAR (Speed is displayed here) -->
+        <include
+            android:id="@+id/controllerContainer"
+            layout="@layout/control_buttons"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:layout_constraintTop_toBottomOf="@id/tuning_layout" />
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>
