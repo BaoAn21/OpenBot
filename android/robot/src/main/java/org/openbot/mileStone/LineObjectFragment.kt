@@ -36,7 +36,6 @@ import kotlin.math.min
 
 class LineObjectFragment : CameraFragment() {
 
-    // --- View Binding ---
     private var _binding: FragmentLineObjectBinding? = null
     private val binding get() = _binding!!
 
@@ -53,9 +52,10 @@ class LineObjectFragment : CameraFragment() {
     private var rotatedMask: Bitmap? = null
     private var maskTransformMatrix: Matrix? = null
 
-    // --- OpenCV & Line Tracking Config (MATCHING JAVA CODE) ---
-    private var scanY = 300
-    private var scanHeight = 30
+    // --- OpenCV & Line Tracking Config (PERCENTAGE BASED) ---
+    private var scanYPercent = 50       // 0 to 100% (Vertical Position)
+    private var scanHeightPercent = 20  // 0 to 100% (Height of the strip)
+
     private var colorThrLow = Scalar(20.0, 100.0, 100.0)
     private var colorThrHi = Scalar(30.0, 255.0, 255.0)
     private val CONFIDENCE_THRESHOLD = 500.0
@@ -86,7 +86,6 @@ class LineObjectFragment : CameraFragment() {
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
     ): View {
         _binding = FragmentLineObjectBinding.inflate(inflater, container, false)
-        // Use 'binding' (the object), NOT binding.root
         return inflateFragment(binding, inflater, container)
     }
 
@@ -100,7 +99,7 @@ class LineObjectFragment : CameraFragment() {
         // 2. Init OpenCV
         mat = Mat(); matHsv = Mat(); matMask = Mat(); matSlice = Mat(); matHist = Mat()
 
-        // 3. Init Paints (Styles copied from Java)
+        // 3. Init Paints
         roiBorderPaint = Paint().apply {
             color = Color.YELLOW
             style = Paint.Style.STROKE
@@ -175,7 +174,6 @@ class LineObjectFragment : CameraFragment() {
         )
 
         // 2. OBJECT DETECTION (ML Kit)
-        // ML Kit needs rotation info separately
         val mlImage = InputImage.fromBitmap(image, imageProxy.imageInfo.rotationDegrees)
 
         segmenter?.process(mlImage)
@@ -185,17 +183,9 @@ class LineObjectFragment : CameraFragment() {
                 processSafetyMask(mask)
 
                 // --- B. DRIVE CONTROL ---
-                if (isBlocked) {
-                    // EMERGENCY STOP
-                    vehicle.setControl(0f, 0f)
-                    updateUI("BLOCKED", Color.RED, 0f)
-
-                    // Still draw the camera feed so screen isn't black
-                    drawBlockedOverlay()
-                } else {
-                    // CLEAR -> RUN LINE TRACKING (Your Java Logic)
-                    runLineTrackingLogic()
-                }
+                // We ALWAYS run the line logic now, passing the "isBlocked" state
+                // This allows the ROI/Line to be drawn even when stopped.
+                runLineTrackingLogic(isBlocked)
 
                 isProcessing = false
             }
@@ -204,10 +194,7 @@ class LineObjectFragment : CameraFragment() {
             }
     }
 
-    /**
-     * This function mimics your Java 'LineTrackingFragment.java' logic exactly
-     */
-    private fun runLineTrackingLogic() {
+    private fun runLineTrackingLogic(forceStop: Boolean) {
         val bitmap = processedBitmap ?: return
         val w = bitmap.width
         val h = bitmap.height
@@ -219,20 +206,26 @@ class LineObjectFragment : CameraFragment() {
         }
         overlayCanvas?.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
 
-        // 2. Clamp Scan Area
-        if (scanY + scanHeight > h) scanY = h - scanHeight
-        if (scanY < 0) scanY = 0
+        // 2. Calculate ROI based on PERCENTAGE
+        // Clamp percentages to safe values
+        val safeYPercent = max(0, min(95, scanYPercent))
+        val safeHPercent = max(1, min(80, scanHeightPercent)) // Min 1%, Max 80%
 
-        val roiRect = Rect(0, scanY, w, scanY + scanHeight)
+        val pixelY = (h * (safeYPercent / 100f)).toInt()
+        val pixelH = (h * (safeHPercent / 100f)).toInt()
+
+        // Ensure we don't go off-screen
+        val finalY = min(pixelY, h - pixelH)
+
+        // Full Width ROI (0 to w)
+        val roiRect = Rect(0, finalY, w, finalY + pixelH)
 
         // 3. OpenCV Processing
         Utils.bitmapToMat(bitmap, mat)
 
-        // Crop
+        // Crop & Process
         val openCVRect = org.opencv.core.Rect(roiRect.left, roiRect.top, roiRect.width(), roiRect.height())
         matSlice = Mat(mat, openCVRect)
-
-        // HSV & Threshold
         Imgproc.cvtColor(matSlice, matHsv, Imgproc.COLOR_RGB2HSV)
         Core.inRange(matHsv, colorThrLow, colorThrHi, matMask)
 
@@ -252,44 +245,49 @@ class LineObjectFragment : CameraFragment() {
         val maxIdx = mmr.maxLoc.x.toFloat()
 
         val driveCommand: Control
-        var error = 0f
+        val centerX = w / 2.0f
 
-        // --- STEERING LOGIC (COPIED FROM JAVA) ---
+        // --- CONTROL LOGIC ---
         if (maxVal > CONFIDENCE_THRESHOLD) {
             // LINE FOUND
             val lineCenterX = maxIdx
-            val lineCenterY = (scanY + scanHeight / 2).toFloat()
+            val lineCenterY = (finalY + pixelH / 2).toFloat()
+            val error = (lineCenterX - centerX) / (w / 2.0f)
 
             // Draw Red Dot
             overlayCanvas?.drawCircle(lineCenterX, lineCenterY, 15f, detectedLinePaint)
-
-            val centerX = w / 2.0f
-            error = (lineCenterX - centerX) / (w / 2.0f)
-
-            // The Steering Math
-            val turn = error * 1.5f
-            var leftSpeed = 0.8f + turn   // <--- UPDATED TO 0.8
-            var rightSpeed = 0.8f - turn  // <--- UPDATED TO 0.8
-
-            // Clamping
-            leftSpeed = max(-1.0f, min(1.0f, leftSpeed))
-            rightSpeed = max(-1.0f, min(1.0f, rightSpeed))
-
-            driveCommand = Control(leftSpeed, rightSpeed)
-
             // Draw Green Direction Line
             robotDirPaint.color = Color.GREEN
             overlayCanvas?.drawLine(centerX, lineCenterY, lineCenterX, lineCenterY, robotDirPaint)
 
-            updateUI("TRACKING", Color.GREEN, error)
+            if (forceStop) {
+                // BLOCKED: Stop motors, but show Red "BLOCKED" text
+                driveCommand = Control(0f, 0f)
+                updateUI("BLOCKED", Color.RED, error)
+            } else {
+                // CLEAR: Drive normal
+                val turn = error * 1.5f
+                var leftSpeed = 0.8f + turn
+                var rightSpeed = 0.8f - turn
+                leftSpeed = max(-1.0f, min(1.0f, leftSpeed))
+                rightSpeed = max(-1.0f, min(1.0f, rightSpeed))
+
+                driveCommand = Control(leftSpeed, rightSpeed)
+                updateUI("TRACKING", Color.GREEN, error)
+            }
+
         } else {
             // LINE LOST
             driveCommand = Control(0f, 0f)
-
             robotDirPaint.color = Color.RED
-            overlayCanvas?.drawLine(w / 2f, scanY.toFloat(), w / 2f, (scanY + scanHeight).toFloat(), robotDirPaint)
+            overlayCanvas?.drawLine(w / 2f, finalY.toFloat(), w / 2f, (finalY + pixelH).toFloat(), robotDirPaint)
 
-            updateUI("LOST LINE", Color.YELLOW, 0f)
+            // If we are blocked, "BLOCKED" takes precedence over "LOST LINE"
+            if (forceStop) {
+                updateUI("BLOCKED", Color.RED, 0f)
+            } else {
+                updateUI("LOST LINE", Color.YELLOW, 0f)
+            }
         }
 
         vehicle.setControl(driveCommand)
@@ -302,7 +300,6 @@ class LineObjectFragment : CameraFragment() {
             return
         }
 
-        // Calculate blockage percentage
         val w = mask.width
         val h = mask.height
         val pixels = IntArray(w * h)
@@ -323,7 +320,6 @@ class LineObjectFragment : CameraFragment() {
             val pipW = binding.safetyPipView.width.toFloat()
             val pipH = binding.safetyPipView.height.toFloat()
 
-            // Match mirroring
             if (isMirrored) maskTransformMatrix?.postScale(-1f, 1f, w/2f, h/2f)
 
             val src = RectF(0f, 0f, w.toFloat(), h.toFloat())
@@ -331,14 +327,6 @@ class LineObjectFragment : CameraFragment() {
             maskTransformMatrix?.setRectToRect(src, dst, Matrix.ScaleToFit.CENTER)
 
             if (isMirrored) maskTransformMatrix?.postScale(-1f, 1f, pipW/2f, pipH/2f)
-        }
-    }
-
-    private fun drawBlockedOverlay() {
-        // If blocked, we still want to see the camera, maybe draw a big "STOP" box?
-        // For now, we just refresh the view so it isn't stuck
-        if(overlayBitmap != null) {
-            binding.lineTrackingMainView.setImageBitmap(overlayBitmap)
         }
     }
 
@@ -360,18 +348,23 @@ class LineObjectFragment : CameraFragment() {
     }
 
     private fun setupSlidersAndColors() {
-        // Setup SeekBars exactly like Java
+        // Scan Y Slider (0-100%)
+        binding.scanYSeekbar.max = 100
+        binding.scanYSeekbar.progress = scanYPercent
         binding.scanYSeekbar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                scanY = progress
+                scanYPercent = progress
             }
             override fun onStartTrackingTouch(seekBar: SeekBar) {}
             override fun onStopTrackingTouch(seekBar: SeekBar) {}
         })
 
+        // Scan Height Slider (1-80%)
+        binding.scanHeightSeekbar.max = 80
+        binding.scanHeightSeekbar.progress = scanHeightPercent
         binding.scanHeightSeekbar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                scanHeight = progress
+                scanHeightPercent = progress
             }
             override fun onStartTrackingTouch(seekBar: SeekBar) {}
             override fun onStopTrackingTouch(seekBar: SeekBar) {}
