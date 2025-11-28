@@ -35,7 +35,18 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"/>
 
-        <!-- Debug Text: Orientation -->
+        <!-- 3. ROI Overlay (Blue Scan Zone) - NEW -->
+        <ImageView
+            android:id="@+id/roi_overlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="fitCenter"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"/>
+
+        <!-- Debug Text -->
         <TextView
             android:id="@+id/orientation_text"
             android:layout_width="wrap_content"
@@ -49,7 +60,6 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
 
-        <!-- Debug Text: Dimensions & Area -->
         <TextView
             android:id="@+id/dimension_text"
             android:layout_width="wrap_content"
@@ -63,7 +73,7 @@
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
 
-        <!-- STOPPED WARNING TEXT -->
+        <!-- Warning Text -->
         <TextView
             android:id="@+id/stop_warning"
             android:layout_width="wrap_content"
@@ -137,7 +147,6 @@
                 android:visibility="gone"
                 android:layout_marginTop="16dp">
 
-                <!-- 1. Auto Pilot Switch -->
                 <androidx.appcompat.widget.SwitchCompat
                     android:id="@+id/auto_switch"
                     android:layout_width="match_parent"
@@ -145,25 +154,53 @@
                     android:text="Auto Pilot"
                     android:textColor="@android:color/black"
                     android:textSize="16sp"
-                    android:layout_marginBottom="16dp"/>
+                    android:layout_marginBottom="12dp"/>
 
-                <!-- 2. Threshold Slider -->
+                <!-- Stop Threshold -->
                 <TextView
                     android:id="@+id/threshold_text"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="Stop if Area > 40%"
                     android:textColor="@android:color/black"/>
-
                 <SeekBar
                     android:id="@+id/threshold_seekbar"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:max="100"
                     android:progress="40"
+                    android:layout_marginBottom="12dp"/>
+
+                <!-- ROI Width -->
+                <TextView
+                    android:id="@+id/roi_width_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="ROI Width: 20%"
+                    android:textColor="@android:color/black"/>
+                <SeekBar
+                    android:id="@+id/roi_width_seekbar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:max="100"
+                    android:progress="20"
+                    android:layout_marginBottom="12dp"/>
+
+                <!-- ROI Position -->
+                <TextView
+                    android:id="@+id/roi_pos_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="ROI Center: 50%"
+                    android:textColor="@android:color/black"/>
+                <SeekBar
+                    android:id="@+id/roi_pos_seekbar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:max="100"
+                    android:progress="50"
                     android:layout_marginBottom="16dp"/>
 
-                <!-- 3. Camera Toggle -->
                 <Button
                     android:id="@+id/camera_toggle_btn"
                     android:layout_width="match_parent"
