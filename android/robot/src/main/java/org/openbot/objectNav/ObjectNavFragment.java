@@ -282,7 +282,7 @@ public class ObjectNavFragment extends CameraFragment {
     frameToCropTransform = null;
 
     sensorOrientation = 90 - ImageUtils.getScreenOrientation(requireActivity());
-
+    Log.d(TAG, "Sensor Orientation " + String.valueOf(sensorOrientation));
     final float textSizePx =
         TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_DIP, TEXT_SIZE_DIP, getResources().getDisplayMetrics());

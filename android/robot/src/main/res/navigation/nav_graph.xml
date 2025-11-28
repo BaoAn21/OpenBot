@@ -53,6 +53,9 @@
             android:id="@+id/action_mainFragment_to_lineObjectFragment"
             app:destination="@id/lineObjectFragment" />
         <action
+            android:id="@+id/action_mainFragment_to_lineObjectTrackingFragment"
+            app:destination="@id/lineObjectTrackingFragment" />
+        <action
             android:id="@+id/action_mainFragment_to_subjectSegmentation"
             app:destination="@+id/subjectSegmentationFragment"></action>
 
@@ -213,7 +216,11 @@
         android:label="Line Object"
         tools:layout="@layout/fragment_line_object" />
 
-
+    <fragment
+        android:id="@+id/lineObjectTrackingFragment"
+        android:name="org.openbot.mileStone.LineObjectTrackingFragment"
+        android:label="Line Object"
+        tools:layout="@layout/fragment_line_object_tracking" />
     <fragment
         android:id="@+id/subjectSegmentationFragment"
         android:name="org.openbot.mlkit.subjectSegmentation.SubjectSegmentationFragment"

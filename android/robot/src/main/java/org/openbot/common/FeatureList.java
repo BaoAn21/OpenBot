@@ -71,6 +71,8 @@ public class FeatureList {
 
   public static final String LINE_OBJECT_RIDING = "Line Object Riding";
 
+  public static final String LINE_OBJECT_TRACKING = "Line Object Tracking";
+
   @NotNull
   public static ArrayList<Category> getCategories() {
     ArrayList<Category> categories = new ArrayList<>();
@@ -87,6 +89,7 @@ public class FeatureList {
 
     subCategories = new ArrayList<>();
     subCategories.add(new SubCategory(LINE_OBJECT_RIDING, R.drawable.ic_person_search, "#4B7BFF"));
+    subCategories.add(new SubCategory(LINE_OBJECT_TRACKING, R.drawable.ic_legacy_car, "#00BCD4"));
     subCategories.add(new SubCategory(LINE_TRACKING, R.drawable.ic_autopilot, "#E7CE88"));
     subCategories.add(new SubCategory(SUBJECT_SEGMENTATION, R.drawable.ic_autopilot, "#44525F"));
     subCategories.add(new SubCategory(AUTOPILOT, R.drawable.ic_autopilot, "#44525F"));
