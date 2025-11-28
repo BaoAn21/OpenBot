@@ -13,6 +13,7 @@ import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.SeekBar
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageProxy
 import com.google.mlkit.vision.common.InputImage
@@ -21,6 +22,7 @@ import com.google.mlkit.vision.segmentation.subject.SubjectSegmenter
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
 import org.openbot.common.CameraFragment
 import org.openbot.databinding.FragmentLineObjectTrackingBinding
+import org.openbot.utils.Constants
 
 class LineObjectTrackingFragment : CameraFragment() {
     private val TAG = "LineObjectTrackingFragment"
@@ -30,17 +32,22 @@ class LineObjectTrackingFragment : CameraFragment() {
     private var segmenter: SubjectSegmenter? = null
     private var isProcessing = false
 
-    // Matrix for aligning the mask
+    // Configuration
+    private var stopThresholdPercent = 40 // Default 40%
+    private var isConfigExpanded = false
+    private var isAutoMode = false
+
+    // Matrix
     private var frameToViewTransform: Matrix? = null
     private var lastMaskWidth = 0
     private var lastMaskHeight = 0
     private var lastRotation = -1
 
-    // Paint for the Boundary Box
+    // Paint
     private val borderPaint = Paint().apply {
         color = Color.YELLOW
         style = Paint.Style.STROKE
-        strokeWidth = 10f // Thick line so it's easy to see
+        strokeWidth = 10f
     }
 
     override fun onCreateView(
@@ -58,9 +65,53 @@ class LineObjectTrackingFragment : CameraFragment() {
             .build()
         segmenter = SubjectSegmentation.getClient(options)
 
-        binding.cameraToggle.setOnClickListener {
+        setupUI()
+    }
+
+    private fun setupUI() {
+        // 1. Auto Pilot Switch
+        binding.autoSwitch.setOnCheckedChangeListener { _, isChecked ->
+            isAutoMode = isChecked
+            if (!isChecked) {
+                // If turned OFF, stop immediately
+                vehicle.setControl(0f, 0f)
+                binding.stopWarning.visibility = View.GONE
+            }
+        }
+
+        // 2. Camera Switch
+        binding.cameraToggleBtn.setOnClickListener {
             toggleCamera()
             frameToViewTransform = null
+        }
+
+        // 3. Threshold Slider
+        binding.thresholdSeekbar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                stopThresholdPercent = progress
+                binding.thresholdText.text = "Stop if Area > $progress%"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        // 4. Expand/Collapse
+        binding.configHeader.setOnClickListener { toggleConfig(!isConfigExpanded) }
+        binding.mainContainer.setOnClickListener { if (isConfigExpanded) toggleConfig(false) }
+    }
+
+    private fun toggleConfig(expand: Boolean) {
+        isConfigExpanded = expand
+        // Animation handled by XML android:animateLayoutChanges="true"
+
+        if (isConfigExpanded) {
+            binding.configContent.visibility = View.VISIBLE
+            binding.configTitle.visibility = View.VISIBLE
+            binding.configCard.setCardBackgroundColor(Color.WHITE)
+        } else {
+            binding.configContent.visibility = View.GONE
+            binding.configTitle.visibility = View.GONE
+            binding.configCard.setCardBackgroundColor(Color.parseColor("#DDFFFFFF"))
         }
     }
 
@@ -77,15 +128,51 @@ class LineObjectTrackingFragment : CameraFragment() {
                 val mask = result.foregroundBitmap
 
                 if (mask != null && _binding != null) {
-                    activity?.runOnUiThread {
-                        // 1. Draw Mask (Magenta Silhouette)
-                        displayMask(mask, sensorRotation)
 
-                        // 2. Draw the Boundary of the Mask (Yellow Box)
+                    // --- 1. CALCULATE PERCENTAGE (Background Thread) ---
+                    val w = mask.width
+                    val h = mask.height
+                    val totalPixels = w * h
+                    var objectPixels = 0
+
+                    val pixels = IntArray(totalPixels)
+                    mask.getPixels(pixels, 0, w, 0, 0, w, h)
+
+                    for (i in pixels.indices step 10) {
+                        if (Color.alpha(pixels[i]) > 0) objectPixels++
+                    }
+
+                    val estimatedObjectPixels = objectPixels * 10
+                    val percentage = (estimatedObjectPixels.toFloat() / totalPixels.toFloat()) * 100f
+
+                    activity?.runOnUiThread {
+                        if (_binding == null) return@runOnUiThread
+
+                        // --- 2. DRIVING LOGIC ---
+                        if (isAutoMode) {
+                            if (percentage > stopThresholdPercent) {
+                                // BLOCKED: Stop
+                                vehicle.setControl(0f, 0f)
+                                binding.stopWarning.visibility = View.VISIBLE
+                                binding.stopWarning.text = "BLOCKED"
+                            } else {
+                                // CLEAR: Drive Forward
+                                // Using 0.5f as a safe default speed
+                                vehicle.setControl(0.5f, 0.5f)
+                                binding.stopWarning.visibility = View.GONE
+                            }
+                        } else {
+                            // AUTO OFF: Do nothing (Allow manual control)
+                            // We do NOT set 0,0 here, otherwise joystick won't work
+                            binding.stopWarning.visibility = View.GONE
+                        }
+
+                        // --- 3. UI UPDATES (Always run) ---
+                        displayMask(mask, sensorRotation)
                         drawMaskBorder(mask)
 
                         binding.orientationText.text = "Rot: $sensorRotation"
-                        binding.dimensionText.text = "Cam: ${image.width}x${image.height}"
+                        binding.dimensionText.text = "Area: %.1f%%".format(percentage)
                     }
                 }
             }
@@ -111,7 +198,6 @@ class LineObjectTrackingFragment : CameraFragment() {
             val maskW = mask.width.toFloat()
             val maskH = mask.height.toFloat()
 
-            // Center -> Rotate -> Scale -> Center -> Mirror
             frameToViewTransform?.postTranslate(-maskW / 2f, -maskH / 2f)
             frameToViewTransform?.postRotate(sensorRotation.toFloat())
 
@@ -121,6 +207,8 @@ class LineObjectTrackingFragment : CameraFragment() {
 
             val scaleX = viewW / rotatedW
             val scaleY = viewH / rotatedH
+
+            // MAX -> Center Crop
             val scale = kotlin.math.max(scaleX, scaleY)
 
             frameToViewTransform?.postScale(scale, scale)
@@ -147,25 +235,25 @@ class LineObjectTrackingFragment : CameraFragment() {
         val viewH = binding.rectOverlay.height
         if (viewW == 0 || viewH == 0) return
 
-        // Create a canvas to draw the box on
         val overlayBitmap = Bitmap.createBitmap(viewW, viewH, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(overlayBitmap)
 
-        // 1. Create a rectangle representing the FULL SIZE of the mask
-        // e.g. Rect(0, 0, 640, 480)
         val maskRect = RectF(0f, 0f, mask.width.toFloat(), mask.height.toFloat())
-
-        // 2. Transform this rectangle using the same matrix as the image
-        // This will rotate, scale, and move the rect to match the visual mask exactly.
         frameToViewTransform?.mapRect(maskRect)
 
-        // 3. Draw it
         canvas.drawRect(maskRect, borderPaint)
-
         binding.rectOverlay.setImageBitmap(overlayBitmap)
     }
 
-    override fun processControllerKeyData(command: String?) { }
+    override fun processControllerKeyData(command: String?) {
+        if (Constants.CMD_NETWORK == command) {
+
+            // Must run on UI thread to update the View
+            activity?.runOnUiThread {
+                binding.autoSwitch.isChecked = !binding.autoSwitch.isChecked
+            }
+        }
+    }
     override fun processUSBData(data: String?) { }
 
     override fun onDestroyView() {
