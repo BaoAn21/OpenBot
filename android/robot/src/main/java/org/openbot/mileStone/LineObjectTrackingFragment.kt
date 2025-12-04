@@ -24,14 +24,18 @@ import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
 import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
 import org.opencv.core.Mat
-import org.opencv.core.Scalar
 import org.opencv.core.Point
+import org.opencv.core.Scalar
 import org.opencv.imgproc.Imgproc
 import org.openbot.common.CameraFragment
 import org.openbot.databinding.FragmentLineObjectTrackingBinding
+import org.openbot.utils.Constants
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
-import kotlin.math.pow
+import kotlin.math.atan2
 import kotlin.math.sqrt
+import com.google.android.gms.tasks.Tasks
 
 class LineObjectTrackingFragment : CameraFragment() {
     private val TAG = "LineObjectTrackingFragment"
@@ -39,14 +43,35 @@ class LineObjectTrackingFragment : CameraFragment() {
     private val binding get() = _binding!!
 
     private var segmenter: SubjectSegmenter? = null
-    private var isProcessing = false
+
+    // --- THREADING & STATE ---
+    // Executor for the Slow ML Task
+    private val mlExecutor = Executors.newSingleThreadExecutor()
+    // Atomic Flag to prevent ML Queue pile-up
+    private val isMLProcessing = AtomicBoolean(false)
+
+    // Volatile State Variables (Shared between Threads)
+    @Volatile private var latestSteeringLeft = 0f
+    @Volatile private var latestSteeringRight = 0f
+    @Volatile private var isBlockedByObstacle = false
+    @Volatile private var isLineLost = false
+    @Volatile private var isAligning = false
 
     // Config
     private var stopThresholdPercent = 40
     private var isConfigExpanded = false
     private var isAutoMode = false
-    private var roiWidthPercent = 20
-    private var roiCenterPercent = 50
+    private var isMirrored = false
+
+    // Pixel-Based ROI Config
+    private var roiWidthPixel = 100  // Width in pixels
+    private var roiStartPixel = 0    // Start Position (Left Edge) in pixels
+    private var isResolutionInit = false // Flag to init sliders once
+
+    // Driving Parameters
+    private var alignmentThresholdDeg = 5.0
+    private val PIVOT_SPEED = 1f
+    private val DRIVE_SPEED = 0.4f
 
     // Matrix
     private var frameToViewTransform: Matrix? = null
@@ -58,7 +83,7 @@ class LineObjectTrackingFragment : CameraFragment() {
     private var grayMat: Mat? = null
     private var cannyMat: Mat? = null
     private var houghLines: Mat? = null
-    private var colorMat: Mat? = null // To draw colored lines on OpenCV
+    private var colorMat: Mat? = null
     private var edgeBitmap: Bitmap? = null
 
     // Paints
@@ -76,8 +101,14 @@ class LineObjectTrackingFragment : CameraFragment() {
         color = Color.GREEN
         style = Paint.Style.STROKE
         strokeWidth = 5f
-        pathEffect = android.graphics.DashPathEffect(floatArrayOf(20f, 10f), 0f) // Dashed line
+        pathEffect = android.graphics.DashPathEffect(floatArrayOf(20f, 10f), 0f)
     }
+
+    data class LineResult(
+        val bitmap: Bitmap?,
+        val angleError: Double?,
+        val hasLine: Boolean
+    )
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
@@ -88,7 +119,6 @@ class LineObjectTrackingFragment : CameraFragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-
         if (OpenCVLoader.initDebug()) Log.d(TAG, "OpenCV loaded")
 
         val options = SubjectSegmenterOptions.Builder()
@@ -105,12 +135,19 @@ class LineObjectTrackingFragment : CameraFragment() {
             if (!isChecked) {
                 vehicle.setControl(0f, 0f)
                 binding.stopWarning.visibility = View.GONE
+                binding.motorText.text = "Manual Mode"
             }
+        }
+
+        binding.mirrorSwitch.setOnCheckedChangeListener { _, isChecked ->
+            isMirrored = isChecked
+            frameToViewTransform = null
         }
 
         binding.cameraToggleBtn.setOnClickListener {
             toggleCamera()
             frameToViewTransform = null
+            isResolutionInit = false // Reset slider limits for new camera
         }
 
         binding.thresholdSeekbar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -122,19 +159,30 @@ class LineObjectTrackingFragment : CameraFragment() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
+        // ROI WIDTH (Pixels)
         binding.roiWidthSeekbar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                roiWidthPercent = progress
-                binding.roiWidthText.text = "ROI Width: $progress%"
+                roiWidthPixel = progress
+                binding.roiWidthText.text = "ROI Width: ${progress}px"
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
 
+        // ROI START POS (Left Edge in Pixels)
         binding.roiPosSeekbar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                roiCenterPercent = progress
-                binding.roiPosText.text = "ROI Center: $progress%"
+                roiStartPixel = progress
+                binding.roiPosText.text = "ROI Start: ${progress}px"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        binding.alignAngleSeekbar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                alignmentThresholdDeg = progress.toDouble()
+                binding.alignAngleText.text = "Align Error: $progress°"
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
@@ -157,25 +205,144 @@ class LineObjectTrackingFragment : CameraFragment() {
         }
     }
 
-    override fun processFrame(image: Bitmap?, imageProxy: ImageProxy?) {
-        if (image == null || imageProxy == null || segmenter == null || isProcessing) return
+    private fun initSliderLimits(camW: Int, camH: Int, rotation: Int) {
+        if (isResolutionInit) return
 
-        isProcessing = true
+        val isRotated = rotation % 180 == 90
+        val scanDimension = if (isRotated) camH else camW
+
+        activity?.runOnUiThread {
+            binding.roiWidthSeekbar.max = scanDimension
+            binding.roiPosSeekbar.max = scanDimension
+
+            if (roiWidthPixel == 0) roiWidthPixel = scanDimension / 5
+            if (roiStartPixel == 0) roiStartPixel = (scanDimension / 2) - (roiWidthPixel / 2)
+
+            binding.roiWidthSeekbar.progress = roiWidthPixel
+            binding.roiPosSeekbar.progress = roiStartPixel
+            binding.roiPosText.text = "ROI Start: ${roiStartPixel}px"
+            binding.roiWidthText.text = "ROI Width: ${roiWidthPixel}px"
+        }
+        isResolutionInit = true
+    }
+
+    override fun processFrame(image: Bitmap?, imageProxy: ImageProxy?) {
+        if (image == null || imageProxy == null || segmenter == null) return
+
         val sensorRotation = imageProxy.imageInfo.rotationDegrees
 
-        // 1. Process Line Detection (Hough)
-        // Returns a Bitmap with the Best Line drawn in RED
-        val cannyResult = processCannyAndHough(image, sensorRotation)
+        // Init Sliders once
+        initSliderLimits(image.width, image.height, sensorRotation)
 
-        // 2. Process Object Detection (ML Kit)
+        // 1. FAST PATH: LINE TRACKING (Runs EVERY Frame)
+        val lineResult = processCannyAndHough(image, sensorRotation)
+        calculateDriveLogic(lineResult)
+        updateVehicleControl()
+
+        activity?.runOnUiThread {
+            if(_binding != null) {
+                drawROI(lineResult.bitmap, sensorRotation, image.width, image.height)
+            }
+        }
+
+        // 2. SLOW PATH: ML KIT (Blocking Background Task)
+        if (!isMLProcessing.get()) {
+            isMLProcessing.set(true)
+
+            // Copy is essential
+            val mlBitmap = image.copy(image.config, false)
+
+            mlExecutor.execute {
+                try {
+                    val inputImage = InputImage.fromBitmap(mlBitmap, sensorRotation)
+
+                    // FIX: Use Tasks.await to force this thread to STOP and WAIT for ML Kit
+                    // This ensures we don't release the flag until calculations are actually done.
+                    val result = Tasks.await(segmenter!!.process(inputImage))
+
+                    // If we get here, we have the result. Process it immediately.
+                    val mask = result.foregroundBitmap
+                    if (mask != null) {
+                        val w = mask.width
+                        val h = mask.height
+                        var objectPixels = 0
+                        val pixels = IntArray(w * h)
+                        mask.getPixels(pixels, 0, w, 0, 0, w, h)
+
+                        for (i in pixels.indices step 10) {
+                            if (Color.alpha(pixels[i]) > 0) objectPixels++
+                        }
+                        val percentage = (objectPixels * 10f / pixels.size.toFloat()) * 100f
+
+                        // Update Shared State
+                        isBlockedByObstacle = percentage > stopThresholdPercent
+
+                        // Update UI
+                        activity?.runOnUiThread {
+                            if (_binding != null) {
+                                displayMask(mask, sensorRotation)
+                                drawMaskBorder(mask)
+                                binding.orientationText.text = "Rot: $sensorRotation"
+                                binding.dimensionText.text = "Area: %.1f%%".format(percentage)
+                            }
+                        }
+                        updateVehicleControl()
+                    }
+
+                } catch (e: Exception) {
+                    Log.e(TAG, "ML Error", e)
+                } finally {
+                    // NOW this is safe. We only set false after await() returns.
+                    isMLProcessing.set(false)
+                }
+            }
+        }
+    }
+
+    // --- LOGIC: Calculate Steering State (Fast) ---
+    private fun calculateDriveLogic(lineResult: LineResult) {
+        val rawAngleError = lineResult.angleError ?: 0.0
+        val finalAngleError = if (isMirrored) -rawAngleError else rawAngleError
+        val isAligned = lineResult.hasLine && abs(finalAngleError) < alignmentThresholdDeg
+
+        if (!lineResult.hasLine) {
+            isLineLost = true
+            isAligning = false
+            latestSteeringLeft = 0f
+            latestSteeringRight = 0f
+        } else if (!isAligned) {
+            isLineLost = false
+            isAligning = true
+            // Calculate Pivot
+            val direction = if (finalAngleError > 0) 1f else -1f
+            latestSteeringLeft = direction * PIVOT_SPEED
+            latestSteeringRight = -direction * PIVOT_SPEED
+
+            // Optional: Update text for angle (Need to be on UI thread or shared var, keeping simple here)
+            activity?.runOnUiThread {
+                if(_binding != null) binding.dimensionText.text = "Err: %.1f°".format(finalAngleError)
+            }
+        } else {
+            isLineLost = false
+            isAligning = false
+            // Go Forward
+            latestSteeringLeft = DRIVE_SPEED
+            latestSteeringRight = DRIVE_SPEED
+        }
+    }
+
+    // --- LOGIC: Process ML Kit (Slow Background) ---
+    private fun processMLKit(image: Bitmap, sensorRotation: Int) {
         val inputImage = InputImage.fromBitmap(image, sensorRotation)
+
+        // Note: process() is synchronous here because we are already inside a background Executor
+        // But Google ML Kit API is Task based, so we block-wait or use listeners.
+        // Since we are in an executor, listeners are fine.
+
         segmenter?.process(inputImage)
             ?.addOnSuccessListener { result ->
-                isProcessing = false
                 val mask = result.foregroundBitmap
-
-                if (mask != null && _binding != null) {
-
+                if (mask != null) {
                     val w = mask.width
                     val h = mask.height
                     var objectPixels = 0
@@ -187,145 +354,166 @@ class LineObjectTrackingFragment : CameraFragment() {
                     }
                     val percentage = (objectPixels * 10f / pixels.size.toFloat()) * 100f
 
+                    // Update Shared State
+                    isBlockedByObstacle = percentage > stopThresholdPercent
+
+                    // Update UI for ML
                     activity?.runOnUiThread {
-                        if (_binding == null) return@runOnUiThread
-
-                        // Driving Logic
-                        if (isAutoMode) {
-                            if (percentage > stopThresholdPercent) {
-                                vehicle.setControl(0f, 0f)
-                                binding.stopWarning.visibility = View.VISIBLE
-                                binding.stopWarning.text = "BLOCKED"
-                            } else {
-                                // TODO: Use the Angle from Hough to steer here!
-                                vehicle.setControl(0.5f, 0.5f)
-                                binding.stopWarning.visibility = View.GONE
-                            }
-                        } else {
-                            binding.stopWarning.visibility = View.GONE
+                        if (_binding != null) {
+                            displayMask(mask, sensorRotation)
+                            drawMaskBorder(mask)
+                            binding.orientationText.text = "Rot: $sensorRotation"
+                            binding.dimensionText.text = "Area: %.1f%%".format(percentage)
                         }
-
-                        // Drawing
-                        displayMask(mask, sensorRotation)
-                        drawMaskBorder(mask)
-                        drawROI(cannyResult, sensorRotation)
-
-                        binding.orientationText.text = "Rot: $sensorRotation"
-                        binding.dimensionText.text = "Area: %.1f%%".format(percentage)
                     }
+
+                    // Trigger a control update in case obstacle status changed while we were processing
+                    updateVehicleControl()
                 }
             }
             ?.addOnFailureListener { e ->
-                isProcessing = false
                 Log.e(TAG, "Segmentation failed", e)
             }
+        // We do not recycle mlBitmap here as ML Kit might still be using internal refs
+        // until the task completes, but usually safe to let GC handle it.
     }
 
-    private fun processCannyAndHough(image: Bitmap, rotation: Int): Bitmap? {
+    // --- CENTRAL CONTROL HUB ---
+    private fun updateVehicleControl() {
+        if (!isAutoMode) return
+
+        activity?.runOnUiThread {
+            if (_binding == null) return@runOnUiThread
+
+            // Priority 1: Obstacle (Safety)
+            if (isBlockedByObstacle) {
+                vehicle.setControl(0f, 0f)
+                binding.stopWarning.visibility = View.VISIBLE
+                binding.stopWarning.text = "BLOCKED"
+                binding.stopWarning.setTextColor(Color.RED)
+                binding.motorText.text = "L: 0.0  R: 0.0"
+            }
+            // Priority 2: Line Lost
+            else if (isLineLost) {
+                vehicle.setControl(0f, 0f)
+                binding.stopWarning.visibility = View.VISIBLE
+                binding.stopWarning.text = "NO LINE"
+                binding.stopWarning.setTextColor(Color.RED)
+                binding.motorText.text = "L: 0.0  R: 0.0"
+            }
+            // Priority 3: Aligning
+            else if (isAligning) {
+                vehicle.setControl(latestSteeringLeft, latestSteeringRight)
+                binding.stopWarning.visibility = View.VISIBLE
+                binding.stopWarning.text = "ALIGNING"
+                binding.stopWarning.setTextColor(Color.YELLOW)
+                binding.motorText.text = "L: %.2f  R: %.2f".format(latestSteeringLeft, latestSteeringRight)
+            }
+            // Priority 4: Drive
+            else {
+                vehicle.setControl(latestSteeringLeft, latestSteeringRight)
+                binding.stopWarning.visibility = View.GONE
+                binding.motorText.text = "L: %.2f  R: %.2f".format(latestSteeringLeft, latestSteeringRight)
+            }
+        }
+    }
+
+    private fun processCannyAndHough(image: Bitmap, rotation: Int): LineResult {
         try {
             val camW = image.width
             val camH = image.height
             val isRotated = rotation % 180 == 90
 
-            val cropRect: Rect
+            val scanDimension = if (isRotated) camH else camW
+            val maxStart = (scanDimension - roiWidthPixel).coerceAtLeast(0)
+            val validStart = roiStartPixel.coerceIn(0, maxStart)
 
+            val isFront = lensFacing == CameraSelector.LENS_FACING_FRONT
+            val shouldMirror = isFront || isMirrored
+
+            val effectiveStart = if (shouldMirror) {
+                scanDimension - validStart - roiWidthPixel
+            } else {
+                validStart
+            }
+
+            val cropRect: Rect
             if (isRotated) {
-                // Portrait: Crop Horizontal Strip
-                val stripThickness = camH * (roiWidthPercent / 100f)
-                val centerPos = camH * (roiCenterPercent / 100f)
-                val top = (centerPos - stripThickness / 2).toInt().coerceIn(0, camH)
-                val bottom = (centerPos + stripThickness / 2).toInt().coerceIn(0, camH)
+                val top = effectiveStart.coerceIn(0, camH)
+                val bottom = (effectiveStart + roiWidthPixel).coerceIn(0, camH)
                 cropRect = Rect(0, top, camW, bottom)
             } else {
-                // Landscape: Crop Vertical Strip
-                val stripThickness = camW * (roiWidthPercent / 100f)
-                val centerPos = camW * (roiCenterPercent / 100f)
-                val left = (centerPos - stripThickness / 2).toInt().coerceIn(0, camW)
-                val right = (centerPos + stripThickness / 2).toInt().coerceIn(0, camW)
+                val left = effectiveStart.coerceIn(0, camW)
+                val right = (effectiveStart + roiWidthPixel).coerceIn(0, camW)
                 cropRect = Rect(left, 0, right, camH)
             }
 
-            if (cropRect.width() <= 0 || cropRect.height() <= 0) return null
+            if (cropRect.width() <= 0 || cropRect.height() <= 0)
+                return LineResult(null, null, false)
+
             val croppedBmp = Bitmap.createBitmap(image, cropRect.left, cropRect.top, cropRect.width(), cropRect.height())
 
-            // Initialize Mats
             if (grayMat == null) grayMat = Mat()
             if (cannyMat == null) cannyMat = Mat()
             if (houghLines == null) houghLines = Mat()
             if (colorMat == null) colorMat = Mat()
 
-            // 1. Preprocessing
             Utils.bitmapToMat(croppedBmp, grayMat)
             Imgproc.cvtColor(grayMat, grayMat, Imgproc.COLOR_RGB2GRAY)
             Imgproc.GaussianBlur(grayMat, grayMat, org.opencv.core.Size(5.0, 5.0), 0.0)
-
-            // 2. Canny Edge Detection
             Imgproc.Canny(grayMat, cannyMat, 50.0, 150.0)
 
-            // 3. Hough Lines
-            // threshold=50, minLineLength=50, maxLineGap=10
             Imgproc.HoughLinesP(cannyMat, houghLines, 1.0, Math.PI / 180, 50, 50.0, 10.0)
-
-            // 4. Find Best Line
-            var maxLen = 0.0
-            var bestLine: IntArray? = null
-
-            for (i in 0 until houghLines!!.rows()) {
-                val l = houghLines!!.get(i, 0) // returns [x1, y1, x2, y2]
-                val x1 = l[0]
-                val y1 = l[1]
-                val x2 = l[2]
-                val y2 = l[3]
-
-                val dx = x2 - x1
-                val dy = y2 - y1
-                val len = sqrt(dx * dx + dy * dy)
-
-                // 5. Filter Slope based on Orientation
-                var isLineGood = false
-                if (isRotated) {
-                    // Portrait: Sensor is Sideways.
-                    // "Straight Up" in world = "Left-Right" in image.
-                    // We want Horizontal lines (dy is small, dx is big)
-                    if (abs(dx) > abs(dy)) isLineGood = true
-                } else {
-                    // Landscape: Sensor is Upright.
-                    // "Straight Up" in world = "Up-Down" in image.
-                    // We want Vertical lines (dy is big, dx is small)
-                    if (abs(dy) > abs(dx)) isLineGood = true
-                }
-
-                if (isLineGood && len > maxLen) {
-                    maxLen = len
-                    bestLine = intArrayOf(x1.toInt(), y1.toInt(), x2.toInt(), y2.toInt())
-                }
-            }
-
-            // 6. Draw on Color Mat (So we can see Red lines)
-            // Convert grayscale/canny back to RGB so we can draw colored lines
             Imgproc.cvtColor(cannyMat, colorMat, Imgproc.COLOR_GRAY2RGB)
 
-            if (bestLine != null) {
-                // Draw Best Line in RED (Thick)
-                Imgproc.line(
-                    colorMat,
-                    Point(bestLine[0].toDouble(), bestLine[1].toDouble()),
-                    Point(bestLine[2].toDouble(), bestLine[3].toDouble()),
-                    Scalar(255.0, 0.0, 0.0), 5
-                )
+            var maxLen = 0.0
+            var bestLine: IntArray? = null
+            var angleError = 0.0
+            val targetAngle = if (isRotated) 0.0 else 90.0
+
+            for (i in 0 until houghLines!!.rows()) {
+                val l = houghLines!!.get(i, 0)
+                val x1 = l[0]; val y1 = l[1]; val x2 = l[2]; val y2 = l[3]
+                val dx = (x2 - x1).toDouble()
+                val dy = (y2 - y1).toDouble()
+                val len = sqrt(dx * dx + dy * dy)
+
+                var angle = Math.toDegrees(atan2(dy, dx))
+                if (angle < 0) angle += 180.0
+
+                var diff = abs(angle - targetAngle)
+                if (diff > 90) diff = abs(diff - 180)
+
+                if (diff < 30) {
+                    if (len > maxLen) {
+                        maxLen = len
+                        bestLine = intArrayOf(x1.toInt(), y1.toInt(), x2.toInt(), y2.toInt())
+                        angleError = if (isRotated) {
+                            if (angle > 90) angle - 180 else angle
+                        } else {
+                            angle - 90
+                        }
+                    }
+                    Imgproc.line(colorMat, Point(x1.toDouble(), y1.toDouble()), Point(x2.toDouble(), y2.toDouble()), Scalar(100.0, 100.0, 100.0), 2)
+                }
             }
 
-            // 7. Output to Bitmap
+            if (bestLine != null) {
+                Imgproc.line(colorMat, Point(bestLine[0].toDouble(), bestLine[1].toDouble()), Point(bestLine[2].toDouble(), bestLine[3].toDouble()), Scalar(255.0, 0.0, 0.0), 8)
+            }
+
             if (edgeBitmap == null || edgeBitmap?.width != colorMat?.cols() || edgeBitmap?.height != colorMat?.rows()) {
                 edgeBitmap = Bitmap.createBitmap(colorMat!!.cols(), colorMat!!.rows(), Bitmap.Config.ARGB_8888)
             }
             Utils.matToBitmap(colorMat, edgeBitmap)
-            return edgeBitmap
 
-        } catch (e: Exception) { return null }
+            return LineResult(edgeBitmap, angleError, bestLine != null)
+        } catch (e: Exception) {
+            return LineResult(null, 0.0, false)
+        }
     }
 
-    private fun drawROI(cannyEdgeBitmap: Bitmap?, rotation: Int) {
+    private fun drawROI(cannyEdgeBitmap: Bitmap?, rotation: Int, camW: Int, camH: Int) {
         if (_binding == null) return
         val viewW = binding.roiOverlay.width
         val viewH = binding.roiOverlay.height
@@ -334,13 +522,20 @@ class LineObjectTrackingFragment : CameraFragment() {
         val overlayBitmap = Bitmap.createBitmap(viewW, viewH, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(overlayBitmap)
 
-        val roiW = viewW * (roiWidthPercent / 100f)
-        val centerX = viewW * (roiCenterPercent / 100f)
-        val left = centerX - (roiW / 2)
-        val right = centerX + (roiW / 2)
+        val isRotated = rotation % 180 == 90
+        val scanDimension = if (isRotated) camH else camW
+        val screenDimension = viewW.toFloat()
+        val scale = screenDimension / scanDimension.toFloat()
+
+        val roiW_Screen = roiWidthPixel * scale
+        val maxStart = (scanDimension - roiWidthPixel).coerceAtLeast(0)
+        val validStart = roiStartPixel.coerceIn(0, maxStart)
+        val roiStart_Screen = validStart * scale
+
+        val left = roiStart_Screen
+        val right = roiStart_Screen + roiW_Screen
         val destRect = RectF(left, 0f, right, viewH.toFloat())
 
-        // 1. Draw Canny Image (with Red Line inside)
         if (cannyEdgeBitmap != null) {
             val m = Matrix()
             val bmpW = cannyEdgeBitmap.width.toFloat()
@@ -349,7 +544,6 @@ class LineObjectTrackingFragment : CameraFragment() {
             m.postTranslate(-bmpW / 2f, -bmpH / 2f)
             m.postRotate(rotation.toFloat())
 
-            val isRotated = rotation % 180 == 90
             val rotatedW = if (isRotated) bmpH else bmpW
             val rotatedH = if (isRotated) bmpW else bmpH
 
@@ -358,7 +552,7 @@ class LineObjectTrackingFragment : CameraFragment() {
             m.postScale(scaleX, scaleY)
 
             val isFront = lensFacing == CameraSelector.LENS_FACING_FRONT
-            if (isFront) {
+            if (isFront || isMirrored) {
                 m.postScale(-1f, 1f)
             }
 
@@ -366,14 +560,9 @@ class LineObjectTrackingFragment : CameraFragment() {
             canvas.drawBitmap(cannyEdgeBitmap, m, null)
         }
 
-        // 2. Draw Blue Border
         canvas.drawRect(destRect, roiPaint)
-
-        // 3. Draw "Robot View" Green Line (Reference)
-        // Always vertical in the center of the ROI
         val refX = destRect.centerX()
         canvas.drawLine(refX, destRect.top, refX, destRect.bottom, robotViewPaint)
-
         binding.roiOverlay.setImageBitmap(overlayBitmap)
     }
 
@@ -406,7 +595,8 @@ class LineObjectTrackingFragment : CameraFragment() {
             frameToViewTransform?.postScale(scale, scale)
             frameToViewTransform?.postTranslate(viewW / 2f, viewH / 2f)
 
-            if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
+            val isFront = lensFacing == CameraSelector.LENS_FACING_FRONT
+            if (isFront || isMirrored) {
                 frameToViewTransform?.postScale(-1f, 1f, viewW / 2f, viewH / 2f)
             }
 
@@ -435,7 +625,7 @@ class LineObjectTrackingFragment : CameraFragment() {
     }
 
     override fun processControllerKeyData(command: String?) {
-        if (org.openbot.utils.Constants.CMD_NETWORK == command) {
+        if (Constants.CMD_NETWORK == command) {
             activity?.runOnUiThread {
                 binding.autoSwitch.isChecked = !binding.autoSwitch.isChecked
             }
@@ -446,6 +636,7 @@ class LineObjectTrackingFragment : CameraFragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        mlExecutor.shutdown()
         segmenter?.close()
         segmenter = null
         _binding = null

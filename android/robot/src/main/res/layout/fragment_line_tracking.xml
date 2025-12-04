@@ -6,7 +6,6 @@
     android:layout_height="match_parent"
     tools:context=".lineTracking.LineTrackingFragment">
 
-    <!-- 1. THE DEBUG OVERLAY -->
     <ImageView
         android:id="@+id/overlay_image_view"
         android:layout_width="match_parent"
@@ -14,7 +13,20 @@
         android:scaleType="fitCenter"
         android:contentDescription="Line Tracking Overlay" />
 
-    <!-- 2. THE CONTROLS (Bottom Sheet) -->
+    <TextView
+        android:id="@+id/warning_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="OBSTACLE DETECTED"
+        android:textColor="#FF0000"
+        android:textSize="32sp"
+        android:textStyle="bold"
+        android:background="#80FFFFFF"
+        android:padding="10dp"
+        android:visibility="gone"
+        tools:visibility="visible"/>
+
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/bottom_sheet_controls"
         android:layout_width="match_parent"
@@ -24,7 +36,6 @@
         app:behavior_peekHeight="90dp"
         app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior">
 
-        <!-- Drag Handle -->
         <View
             android:id="@+id/view"
             android:layout_width="48dp"
@@ -36,7 +47,6 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
 
-        <!-- TOP ROW: Switch and Error Text -->
         <androidx.appcompat.widget.SwitchCompat
             android:id="@+id/auto_switch"
             android:layout_width="wrap_content"
@@ -59,9 +69,8 @@
             app:layout_constraintBottom_toBottomOf="@id/auto_switch"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintTop_toTopOf="@id/auto_switch"
-            tools:text="Err: 0.0" />
+            tools:text="Area: 0%" />
 
-        <!-- NEW ROW: Camera Toggle & Mirror -->
         <LinearLayout
             android:id="@+id/camera_controls_layout"
             android:layout_width="match_parent"
@@ -93,7 +102,6 @@
                 android:button="@drawable/mirror_control" />
         </LinearLayout>
 
-        <!-- CONTROLS CONTAINER -->
         <LinearLayout
             android:id="@+id/controls_layout"
             android:layout_width="match_parent"
@@ -105,7 +113,6 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent">
 
-            <!-- COLOR SELECTOR -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -144,7 +151,6 @@
                     android:text="White" />
             </RadioGroup>
 
-            <!-- SCAN Y POSITION SLIDER -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -153,7 +159,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Scan Y Position (Up/Down)"
+                    android:text="Scan Y Position"
                     android:textColor="@android:color/black" />
                 <TextView
                     android:id="@+id/scan_y_text"
@@ -163,26 +169,23 @@
                     android:textStyle="bold"
                     tools:text="300" />
             </LinearLayout>
-
             <SeekBar
                 android:id="@+id/scan_y_seekbar"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
                 android:max="639"
                 android:progress="300" />
 
-            <!-- SCAN HEIGHT SLIDER -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:layout_marginTop="16dp">
+                android:layout_marginTop="8dp">
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Scan Height (Thickness)"
+                    android:text="Scan Height"
                     android:textColor="@android:color/black" />
                 <TextView
                     android:id="@+id/scan_height_text"
@@ -192,18 +195,41 @@
                     android:textStyle="bold"
                     tools:text="30" />
             </LinearLayout>
-
             <SeekBar
                 android:id="@+id/scan_height_seekbar"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
                 android:max="100"
                 android:min="1"
                 android:progress="30" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="8dp">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Obstacle Stop Threshold (%)"
+                    android:textColor="@android:color/black" />
+                <TextView
+                    android:id="@+id/obstacle_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@android:color/black"
+                    android:textStyle="bold"
+                    tools:text="40%" />
+            </LinearLayout>
+            <SeekBar
+                android:id="@+id/obstacle_seekbar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:max="100"
+                android:progress="40" />
         </LinearLayout>
 
-        <!-- BOTTOM BUTTONS (Inherited) -->
         <include
             android:id="@+id/controllerContainer"
             layout="@layout/control_buttons"
