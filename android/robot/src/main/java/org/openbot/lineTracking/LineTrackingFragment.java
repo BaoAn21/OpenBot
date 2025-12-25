@@ -273,9 +273,10 @@ public class LineTrackingFragment extends CameraFragment {
             float centerX = w / 2.0f;
             error = (lineCenterX - centerX) / (w / 2.0f);
 
-            float turn = error * 1.5f;
-            float leftSpeed = 0.8f + turn;
-            float rightSpeed = 0.8f - turn;
+            // Slow down
+            float turn = error * 0.75f;
+            float leftSpeed = 0.7f + turn;
+            float rightSpeed = 0.7f - turn;
 
             leftSpeed = Math.max(-1.0f, Math.min(1.0f, leftSpeed));
             rightSpeed = Math.max(-1.0f, Math.min(1.0f, rightSpeed));
