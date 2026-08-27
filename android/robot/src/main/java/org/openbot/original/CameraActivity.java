@@ -1076,8 +1076,8 @@ public abstract class CameraActivity extends AppCompatActivity
   protected void sendControlToSensorService() {
     if (sensorMessenger != null) {
       Message msg = Message.obtain();
-      msg.arg1 = (int) (vehicle.getLeftSpeed());
-      msg.arg2 = (int) (vehicle.getRightSpeed());
+      msg.arg1 = (int) (vehicle.getSteering());
+      msg.arg2 = (int) (vehicle.getThrottle());
       msg.what = SensorService.MSG_CONTROL;
       try {
         sensorMessenger.send(msg);
@@ -1381,7 +1381,7 @@ public abstract class CameraActivity extends AppCompatActivity
     }
 
     protected void handleDriveCommand(Float l, Float r) {
-      vehicle.setControl(l, r);
+      vehicle.setControl(Control.fromLeftRight(l, r));
       updateVehicleControl();
     }
 

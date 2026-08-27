@@ -92,7 +92,7 @@ public class Navigation extends Network {
     Timber.v("Timecost to run model inference: %s", (endTime - startTime));
 
     Trace.endSection(); // "recognizeImage"
-    return new Control(predicted_ctrl[0][0], predicted_ctrl[0][1]);
+    return Control.fromLeftRight(predicted_ctrl[0][0], predicted_ctrl[0][1]);
   }
 
   @Override

@@ -208,10 +208,10 @@ public class FreeRoamFragment extends ControlsFragment {
   }
 
   protected void handleDriveCommand() {
-    float left = vehicle.getLeftSpeed();
-    float right = vehicle.getRightSpeed();
+    float steering = vehicle.getSteering();
+    float throttle = vehicle.getThrottle();
     binding.controllerContainer.controlInfo.setText(
-        String.format(Locale.US, "%.0f,%.0f", left, right));
+        String.format(Locale.US, "%.0f,%.0f", steering, throttle));
 
     binding.speed.speedPercentTo(vehicle.getSpeedPercent());
 

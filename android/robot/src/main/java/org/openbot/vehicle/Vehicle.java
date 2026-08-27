@@ -249,18 +249,17 @@ public class Vehicle {
   }
 
   public float getRotation() {
-    float rotation = (getLeftSpeed() - getRightSpeed()) * 180 / (getLeftSpeed() + getRightSpeed());
+    float rotation = getSteering() * 180 / Control.MAX;
     if (Float.isNaN(rotation) || Float.isInfinite(rotation)) rotation = 0f;
     return rotation;
   }
 
   public int getSpeedPercent() {
-    float throttle = (getLeftSpeed() + getRightSpeed()) / 2;
-    return Math.abs((int) (throttle * 100 / 255)); // 255 is the max speed
+    return Math.abs((int) (getThrottle() * 100 / Control.MAX));
   }
 
   public String getDriveGear() {
-    float throttle = (getLeftSpeed() + getRightSpeed()) / 2;
+    float throttle = getThrottle();
     if (throttle > 0) return "D";
     if (throttle < 0) return "R";
     return "P";
@@ -283,8 +282,8 @@ public class Vehicle {
     sendControl();
   }
 
-  public void setControl(float left, float right) {
-    this.control = new Control(left, right);
+  public void setControl(float steering, float throttle) {
+    this.control = new Control(steering, throttle);
     sendControl();
   }
 
@@ -398,12 +397,14 @@ public class Vehicle {
     }
   }
 
-  public float getLeftSpeed() {
-    return control.getLeft() * speedMultiplier;
+  /** Steering command in [-255, 255]. Not affected by the speed mode. */
+  public float getSteering() {
+    return control.getSteering();
   }
 
-  public float getRightSpeed() {
-    return control.getRight() * speedMultiplier;
+  /** Throttle command in [-255, 255], scaled down by the current speed mode. */
+  public float getThrottle() {
+    return control.getThrottle() * speedMultiplier / Control.MAX;
   }
 
   public void sendLightIntensity(float frontPercent, float backPercent) {
@@ -414,19 +415,14 @@ public class Vehicle {
 
   public void sendControl() {
 
-    int left = (int) (getLeftSpeed());
-    int right = (int) (getRightSpeed());
+    float steering = getSteering();
+    int throttle = (int) (getThrottle());
 
-    if (noiseEnabled && noise.getDirection() < 0)
-      left =
-          (int)
-              ((control.getLeft() - noise.getValue())
-                  * speedMultiplier); // since noise value does not have speedMultiplier component,
-    // raw control value is used
-    if (noiseEnabled && noise.getDirection() > 0)
-      right = (int) ((control.getRight() - noise.getValue()) * speedMultiplier);
+    // Noise nudges the steering to either side; getValue() is normalized, so scale it up.
+    if (noiseEnabled) steering += noise.getDirection() * noise.getValue() * Control.MAX;
+    steering = Math.max(-Control.MAX, Math.min(Control.MAX, steering));
 
-    sendStringToDevice(String.format(Locale.US, "c%d,%d\n", left, right));
+    sendStringToDevice(String.format(Locale.US, "c%d,%d\n", (int) steering, throttle));
   }
 
   protected void sendHeartbeat(int timeout_ms) {

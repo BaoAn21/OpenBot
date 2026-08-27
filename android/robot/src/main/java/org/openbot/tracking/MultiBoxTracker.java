@@ -196,7 +196,7 @@ public class MultiBoxTracker {
       rightControl = 0.0f;
     }
 
-    return new Control(
+    return Control.fromLeftRight(
         (0 > sensorOrientation) ? rightControl : leftControl,
         (0 > sensorOrientation) ? leftControl : rightControl);
   }

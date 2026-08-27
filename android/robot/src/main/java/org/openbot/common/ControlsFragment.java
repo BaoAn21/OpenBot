@@ -116,8 +116,8 @@ public abstract class ControlsFragment extends Fragment implements ServerListene
                   vehicle
                       .getGameController()
                       .processButtonInput(result.getParcelable(Constants.DATA));
-              if (vehicle.getControl().getLeft() != newControl.getLeft()
-                  && vehicle.getControl().getRight() != newControl.getRight()) {
+              if (vehicle.getControl().getSteering() != newControl.getSteering()
+                  && vehicle.getControl().getThrottle() != newControl.getThrottle()) {
                 vehicle.setControl(newControl);
               }
             });
@@ -356,7 +356,7 @@ public abstract class ControlsFragment extends Fragment implements ServerListene
 
   private void applyDriveCommand(JSONObject driveValue) {
     vehicle.setControl(
-        new Control(
+        Control.fromLeftRight(
             (float) driveValue.optDouble("l", 0), (float) driveValue.optDouble("r", 0)));
   }
 

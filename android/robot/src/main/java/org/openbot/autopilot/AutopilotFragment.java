@@ -345,7 +345,7 @@ public class AutopilotFragment extends CameraFragment {
         switch (commandType) {
             case Constants.CMD_DRIVE:
                 binding.controllerContainer.controlInfo.setText(
-                        String.format(Locale.US, "%.0f,%.0f", vehicle.getLeftSpeed(), vehicle.getRightSpeed()));
+                        String.format(Locale.US, "%.0f,%.0f", vehicle.getSteering(), vehicle.getThrottle()));
                 break;
 
             case Constants.CMD_DRIVE_MODE:
@@ -459,13 +459,13 @@ public class AutopilotFragment extends CameraFragment {
 
     protected void handleDriveCommand(Control control) {
         vehicle.setControl(control);
-        float left = vehicle.getLeftSpeed();
-        float right = vehicle.getRightSpeed();
+        float steering = vehicle.getSteering();
+        float throttle = vehicle.getThrottle();
         requireActivity()
                 .runOnUiThread(
                         () ->
                                 binding.controllerContainer.controlInfo.setText(
-                                        String.format(Locale.US, "%.0f,%.0f", left, right)));
+                                        String.format(Locale.US, "%.0f,%.0f", steering, throttle)));
     }
 
     @Override

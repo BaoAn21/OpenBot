@@ -25,31 +25,33 @@ public class VehicleTest {
   public void getRotation() {
     assertEquals(0, vehicle.getRotation(), 0.0);
 
-    vehicle.setControl(new Control(0.5f, 1));
-    assertEquals(-60, vehicle.getRotation(), 0.0);
+    vehicle.setControl(new Control(Control.MAX / 2, 0));
+    assertEquals(90, vehicle.getRotation(), 0.0);
 
-    vehicle.setControl(new Control(0f, 1));
+    vehicle.setControl(new Control(-Control.MAX, 0));
     assertEquals(-180, vehicle.getRotation(), 0.0);
   }
 
   @Test
-  public void getSpeed() {
+  public void getThrottleIsScaledBySpeedMode() {
     vehicle.setSpeedMultiplier(Enums.SpeedMode.SLOW.getValue());
-    vehicle.setControl(new Control(-1, -1));
-
-    assertEquals(-128, vehicle.getLeftSpeed(), 0.0);
-    assertEquals(-128, vehicle.getRightSpeed(), 0.0);
+    vehicle.setControl(new Control(0, -Control.MAX));
+    assertEquals(-128, vehicle.getThrottle(), 0.0);
 
     vehicle.setSpeedMultiplier(Enums.SpeedMode.NORMAL.getValue());
-    vehicle.setControl(new Control(-1, -1));
-
-    assertEquals(-192, vehicle.getLeftSpeed(), 0.0);
-    assertEquals(-192, vehicle.getRightSpeed(), 0.0);
+    vehicle.setControl(new Control(0, -Control.MAX));
+    assertEquals(-192, vehicle.getThrottle(), 0.0);
 
     vehicle.setSpeedMultiplier(Enums.SpeedMode.FAST.getValue());
-    vehicle.setControl(new Control(1, 1));
-
-    assertEquals(255, vehicle.getLeftSpeed(), 0.0);
-    assertEquals(255, vehicle.getRightSpeed(), 0.0);
+    vehicle.setControl(new Control(0, Control.MAX));
+    assertEquals(255, vehicle.getThrottle(), 0.0);
   }
+
+  @Test
+  public void getSteeringIgnoresSpeedMode() {
+    vehicle.setSpeedMultiplier(Enums.SpeedMode.SLOW.getValue());
+    vehicle.setControl(new Control(Control.MAX, 0));
+    assertEquals(255, vehicle.getSteering(), 0.0);
+  }
+
 }

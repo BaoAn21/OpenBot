@@ -12,6 +12,7 @@ import org.jetbrains.annotations.NotNull;
 import org.openbot.R;
 import org.openbot.common.ControlsFragment;
 import org.openbot.databinding.FragmentRobotInfoBinding;
+import org.openbot.vehicle.Control;
 
 public class RobotInfoFragment extends ControlsFragment {
   private FragmentRobotInfoBinding binding;
@@ -86,9 +87,9 @@ public class RobotInfoFragment extends ControlsFragment {
           vehicle.sendLightIntensity(value / 100, value / 100);
         });
 
-    binding.motorsForwardButton.setOnClickListener(v -> vehicle.setControl(0.75f, 0.75f));
+    binding.motorsForwardButton.setOnClickListener(v -> vehicle.setControl(0.f, 0.75f * Control.MAX));
 
-    binding.motorsBackwardButton.setOnClickListener(v -> vehicle.setControl(-0.75f, -0.75f));
+    binding.motorsBackwardButton.setOnClickListener(v -> vehicle.setControl(0.f, -0.75f * Control.MAX));
 
     binding.motorsStopButton.setOnClickListener(v -> vehicle.setControl(0.0f, 0.0f));
 

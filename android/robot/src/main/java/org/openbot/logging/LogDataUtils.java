@@ -13,10 +13,10 @@ public class LogDataUtils {
     return msg;
   }
 
-  public static Message generateControlDataMessage(int left, int right) {
+  public static Message generateControlDataMessage(int steering, int throttle) {
     Message msg = Message.obtain();
-    msg.arg1 = left;
-    msg.arg2 = right;
+    msg.arg1 = steering;
+    msg.arg2 = throttle;
     msg.what = SensorService.MSG_CONTROL;
     return msg;
   }

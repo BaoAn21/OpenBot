@@ -341,7 +341,7 @@ public class LoggerFragment extends CameraFragment {
       try {
         sensorMessenger.send(
             LogDataUtils.generateControlDataMessage(
-                (int) vehicle.getLeftSpeed(), (int) vehicle.getRightSpeed()));
+                (int) vehicle.getSteering(), (int) vehicle.getThrottle()));
       } catch (RemoteException e) {
         e.printStackTrace();
       }
@@ -554,10 +554,10 @@ public class LoggerFragment extends CameraFragment {
   }
 
   protected void handleDriveCommand() {
-    float left = vehicle.getLeftSpeed();
-    float right = vehicle.getRightSpeed();
+    float steering = vehicle.getSteering();
+    float throttle = vehicle.getThrottle();
     binding.controllerContainer.controlInfo.setText(
-        String.format(Locale.US, "%.0f,%.0f", left, right));
+        String.format(Locale.US, "%.0f,%.0f", steering, throttle));
     runInBackground(this::sendControlToSensorService);
   }
 
