@@ -44,9 +44,17 @@ def augment_cmd(cmd):
 
 
 def flip_sample(img, cmd, label):
+    """
+    Mirrors an (image, steering, throttle) sample horizontally.
+
+    label is (steering, throttle) in Ackermann convention, so a horizontal
+    flip negates steering and leaves throttle unchanged (matches
+    Control.mirror() in the Android robot app) rather than swapping the
+    two channels as a tank-drive (left, right) flip would.
+    """
     coin = np.random.default_rng().uniform(low=0.0, high=1.0, size=None)
     if coin < 0.5:
         img = tf.image.flip_left_right(img)
         cmd = -cmd
-        label = tf.reverse(label, axis=[0])
+        label = tf.stack([-label[0], label[1]])
     return img, cmd, label
