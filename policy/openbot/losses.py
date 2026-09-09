@@ -9,8 +9,23 @@ def angle(y):
     return y[:, 0]
 
 
+def throttle(y):
+    return y[:, 1]
+
+
 def angle_weight(y_gt, eps=0.05):
     return tf.math.square(angle(y_gt)) + eps
+
+
+def command_weight(y_gt, eps=0.05):
+    # Up-weights any "non-trivial" command sample - a sharp turn OR strong
+    # throttle (e.g. driving straight backward at full speed) - instead of
+    # only sharp turns. Weighting by steering alone starves the loss of
+    # signal on straight-line driving, since most reverse driving has near
+    # -zero steering: it would otherwise be weighted down to ~eps^2, ~175x
+    # less than a sharp-turn sample, and the model learns to under-predict
+    # throttle whenever steering is small.
+    return tf.math.maximum(tf.math.abs(angle(y_gt)), tf.math.abs(throttle(y_gt))) + eps
 
 
 def mse_raw(y_gt, y_pred):
@@ -31,7 +46,7 @@ def mse_angle(y_gt, y_pred):
 
 
 def weighted_mse_raw(y_true, y_pred):
-    weight = tf.math.abs(angle(y_true) + 0.05)
+    weight = command_weight(y_true)
     return weight * tf.keras.losses.mean_squared_error(y_true, y_pred)
 
 
@@ -40,7 +55,7 @@ def weighted_mse_angle(y_gt, y_pred):
 
 
 def sq_weighted_mse_angle(y_true, y_pred):
-    weight = tf.math.abs(angle(y_true) + 0.05)
+    weight = command_weight(y_true)
     return tf.math.square(weight) * (
         tf.keras.losses.mean_squared_error(y_true, y_pred) + mse_angle(y_true, y_pred)
     )
