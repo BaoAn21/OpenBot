@@ -30,11 +30,13 @@ import org.openbot.R;
 import org.openbot.common.CameraFragment;
 import org.openbot.databinding.FragmentAutopilotBinding;
 import org.openbot.env.BorderedText;
+import org.openbot.env.BotToControllerEventBus;
 import org.openbot.env.ImageUtils;
 import org.openbot.tflite.Autopilot;
 import org.openbot.tflite.Model;
 import org.openbot.tflite.Network;
 import org.openbot.tracking.MultiBoxTracker;
+import org.openbot.utils.ConnectionUtils;
 import org.openbot.utils.Constants;
 import org.openbot.utils.Enums;
 import org.openbot.utils.PermissionUtils;
@@ -79,11 +81,17 @@ public class AutopilotFragment extends CameraFragment {
     }
 
     @Override
+    public void onDestroyView() {
+        super.onDestroyView();
+        BotToControllerEventBus.emitEvent(
+            ConnectionUtils.createStatus("FRAGMENT_TYPE", "CLOSE"));
+    }
+
+    @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
         binding.controllerContainer.speedInfo.setText(getString(R.string.speedInfo, "---,---"));
-
-        binding.deviceSpinner.setSelection(preferencesManager.getDevice());
+        initDeviceSpinner(binding.deviceSpinner, preferencesManager.getDevice());
         setNumThreads(preferencesManager.getNumThreads());
         binding.threads.setText(String.valueOf(getNumThreads()));
         binding.cameraToggle.setOnClickListener(v -> toggleCamera());
@@ -176,6 +184,10 @@ public class AutopilotFragment extends CameraFragment {
                                         Enums.SpeedMode.getByID(preferencesManager.getSpeedMode()))));
 
         binding.autoSwitch.setOnClickListener(v -> setNetworkEnabled(binding.autoSwitch.isChecked()));
+        BotToControllerEventBus.emitEvent(
+            ConnectionUtils.createStatus(
+                "FRAGMENT_TYPE", Enums.FragmentType.AUTOPILOT.getFragment()));
+
     }
 
     private void updateCropImageInfo() {
@@ -333,7 +345,7 @@ public class AutopilotFragment extends CameraFragment {
         switch (commandType) {
             case Constants.CMD_DRIVE:
                 binding.controllerContainer.controlInfo.setText(
-                        String.format(Locale.US, "%.0f,%.0f", vehicle.getLeftSpeed(), vehicle.getRightSpeed()));
+                        String.format(Locale.US, "%.0f,%.0f", vehicle.getSteering(), vehicle.getThrottle()));
                 break;
 
             case Constants.CMD_DRIVE_MODE:
@@ -354,10 +366,17 @@ public class AutopilotFragment extends CameraFragment {
                                 Enums.SpeedMode.getByID(preferencesManager.getSpeedMode())));
                 break;
 
-            case Constants.CMD_NETWORK:
-                setNetworkEnabledWithAudio(!binding.autoSwitch.isChecked());
-                break;
         }
+    }
+
+    @Override
+    protected void handleNetworkCommand() {
+        setNetworkEnabledWithAudio(!binding.autoSwitch.isChecked());
+    }
+
+    @Override
+    protected boolean isNetworkModeEnabled() {
+        return binding.autoSwitch.isChecked();
     }
 
     private void setNetworkEnabledWithAudio(boolean b) {
@@ -381,6 +400,7 @@ public class AutopilotFragment extends CameraFragment {
 
     private void setNetworkEnabled(boolean b) {
         binding.autoSwitch.setChecked(b);
+        emitNetworkStatus(b);
         binding.controllerContainer.controlMode.setEnabled(!b);
         binding.controllerContainer.driveMode.setEnabled(!b);
         binding.controllerContainer.speedMode.setEnabled(!b);
@@ -439,13 +459,13 @@ public class AutopilotFragment extends CameraFragment {
 
     protected void handleDriveCommand(Control control) {
         vehicle.setControl(control);
-        float left = vehicle.getLeftSpeed();
-        float right = vehicle.getRightSpeed();
+        float steering = vehicle.getSteering();
+        float throttle = vehicle.getThrottle();
         requireActivity()
                 .runOnUiThread(
                         () ->
                                 binding.controllerContainer.controlInfo.setText(
-                                        String.format(Locale.US, "%.0f,%.0f", left, right)));
+                                        String.format(Locale.US, "%.0f,%.0f", steering, throttle)));
     }
 
     @Override
@@ -487,7 +507,8 @@ public class AutopilotFragment extends CameraFragment {
             final boolean threadsEnabled = device == Network.Device.CPU;
             binding.plus.setEnabled(threadsEnabled);
             binding.minus.setEnabled(threadsEnabled);
-            binding.threads.setText(threadsEnabled ? String.valueOf(numThreads) : "N/A");
+            binding.threads.setText(
+                threadsEnabled ? String.valueOf(numThreads) : getString(R.string.n_a));
             if (threadsEnabled) binding.threads.setTextColor(Color.BLACK);
             else binding.threads.setTextColor(Color.GRAY);
             preferencesManager.setDevice(device.ordinal());
@@ -590,4 +611,3 @@ public class AutopilotFragment extends CameraFragment {
         binding.controllerContainer.driveMode.setAlpha(1.0f);
     }
 }
-

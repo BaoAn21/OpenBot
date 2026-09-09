@@ -201,7 +201,7 @@ public class SensorService extends Service implements SensorEventListener {
     appendLog(inferenceLog, "frame, inferenceTime [ns]");
 
     ctrlLog = openLog(logFolder, "ctrlLog.txt");
-    appendLog(ctrlLog, "timestamp[ns],leftCtrl,rightCtrl");
+    appendLog(ctrlLog, "timestamp[ns],steering,throttle");
 
     indicatorLog = openLog(logFolder, "indicatorLog.txt");
     appendLog(indicatorLog, "timestamp[ns],signal");
@@ -409,7 +409,7 @@ public class SensorService extends Service implements SensorEventListener {
           long inferenceTime = msg.getData().getLong("inferenceTime");
           if (inferenceLog != null) appendLog(inferenceLog, frameNumber + "," + inferenceTime);
         } else if (msg.what == MSG_CONTROL) {
-          // msg.arg1 and msg.arg2 contain left and right control signals respectively
+          // msg.arg1 and msg.arg2 contain the steering and throttle commands respectively
           if (ctrlLog != null)
             appendLog(
                 ctrlLog, SystemClock.elapsedRealtimeNanos() + "," + msg.arg1 + "," + msg.arg2);

@@ -49,8 +49,8 @@ public class GameController {
   }
 
   public Control processButtonInput(KeyEvent event) {
-    float left = 0;
-    float right = 0;
+    float steering = 0;
+    float throttle = 0;
     switch (event.getKeyCode()) {
       case KeyEvent.KEYCODE_BUTTON_A:
         //        Toast.makeText(OpenBotApplication.getContext(), "A recognized",
@@ -78,38 +78,22 @@ public class GameController {
         break;
       case KeyEvent.KEYCODE_DPAD_UP:
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
-          left = 1.0F;
-          right = 1.0F;
-        } else if (event.getAction() == KeyEvent.ACTION_UP) {
-          left = 0.0F;
-          right = 0.0F;
+          throttle = Control.MAX;
         }
         break;
       case KeyEvent.KEYCODE_DPAD_RIGHT:
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
-          left = 1.0F;
-          right = -1.0F;
-        } else if (event.getAction() == KeyEvent.ACTION_UP) {
-          left = 0.0F;
-          right = 0.0F;
+          steering = Control.MAX;
         }
         break;
       case KeyEvent.KEYCODE_DPAD_DOWN:
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
-          left = -1.0F;
-          right = -1.0F;
-        } else if (event.getAction() == KeyEvent.ACTION_UP) {
-          left = 0.0F;
-          right = 0.0F;
+          throttle = -Control.MAX;
         }
         break;
       case KeyEvent.KEYCODE_DPAD_LEFT:
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
-          left = -1.0F;
-          right = 1.0F;
-        } else if (event.getAction() == KeyEvent.ACTION_UP) {
-          left = 0.0F;
-          right = 0.0F;
+          steering = -Control.MAX;
         }
         break;
       default:
@@ -120,17 +104,18 @@ public class GameController {
         //            .show();
         break;
     }
-    return new Control(left, right);
+    return new Control(steering, throttle);
   }
 
   public Control processJoystickInput(MotionEvent event, int historyPos) {
 
     switch (driveMode) {
       case DUAL:
-        float leftStick = getCenteredAxis(event, MotionEvent.AXIS_Y, historyPos);
-        float rightStick = getCenteredAxis(event, MotionEvent.AXIS_RZ, historyPos);
+        // Left stick vertical drives, right stick horizontal steers.
+        float leftStickY = getCenteredAxis(event, MotionEvent.AXIS_Y, historyPos);
+        float rightStickX = getCenteredAxis(event, MotionEvent.AXIS_Z, historyPos);
 
-        return convertDualToControl(leftStick, rightStick);
+        return convertDualToControl(leftStickY, rightStickX);
 
       case GAME:
         float rightTrigger = getCenteredAxis(event, MotionEvent.AXIS_GAS, historyPos);
@@ -143,16 +128,9 @@ public class GameController {
           leftTrigger = getCenteredAxis(event, MotionEvent.AXIS_LTRIGGER, historyPos);
         }
 
-        // Calculate the steering magnitude by
-        // using the input value from one of these physical controls:
-        // the left control stick, hat axis, or the right control stick.
+        // Steering comes from the left control stick only, so that no other axis can
+        // inject a steering command while the stick is centered.
         float steeringOffset = getCenteredAxis(event, MotionEvent.AXIS_X, historyPos);
-        if (steeringOffset == 0) {
-          steeringOffset = getCenteredAxis(event, MotionEvent.AXIS_HAT_X, historyPos);
-        }
-        if (steeringOffset == 0) {
-          steeringOffset = getCenteredAxis(event, MotionEvent.AXIS_Z, historyPos);
-        }
 
         return convertGameToControl(leftTrigger, rightTrigger, steeringOffset);
 
@@ -186,32 +164,18 @@ public class GameController {
     }
   }
 
-  public Control convertDualToControl(float leftStick, float rightStick) {
-    return new Control(-leftStick, -rightStick);
+  public Control convertDualToControl(float leftStickY, float rightStickX) {
+    // Android reports the stick's up direction as negative, so the throttle axis is inverted.
+    return new Control(rightStickX * Control.MAX, -leftStickY * Control.MAX);
   }
 
   public Control convertGameToControl(float leftTrigger, float rightTrigger, float steeringOffset) {
-    float left = rightTrigger - leftTrigger;
-    float right = rightTrigger - leftTrigger;
-
-    if (left >= 0) left += steeringOffset;
-    else left -= steeringOffset;
-    if (right >= 0) right -= steeringOffset;
-    else right += steeringOffset;
-
-    return new Control(left, right);
+    return new Control(
+        steeringOffset * Control.MAX, (rightTrigger - leftTrigger) * Control.MAX);
   }
 
   public Control convertJoystickToControl(float xAxis, float yAxis) {
-    float left = -yAxis;
-    float right = -yAxis;
-
-    if (left >= 0) left += xAxis;
-    else left -= xAxis;
-    if (right >= 0) right -= xAxis;
-    else right += xAxis;
-
-    return new Control(left, right);
+    return new Control(xAxis * Control.MAX, -yAxis * Control.MAX);
   }
 
   public static Pair<Float, Float> processJoystickInputLeft(MotionEvent event, int historyPos) {

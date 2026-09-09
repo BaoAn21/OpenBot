@@ -34,6 +34,7 @@ import org.openbot.tflite.Model;
 import org.openbot.tflite.Navigation;
 import org.openbot.tflite.Network;
 import org.openbot.utils.Enums;
+import org.openbot.vehicle.Control;
 import org.openbot.vehicle.Vehicle;
 import timber.log.Timber;
 
@@ -84,29 +85,25 @@ public class BotFunctions implements SensorEventListener {
   @JavascriptInterface
   public void moveForward(int speed) {
     mActivity.runOnUiThread(() -> binding.jsCommand.setText("Move Forward at " + speed));
-    double speedResult = (double) speed / (double) vehicle.getSpeedMultiplier();
-    vehicle.setControl((float) speedResult, (float) speedResult);
+    vehicle.setControl(0.f, (float) speed);
   }
 
   @JavascriptInterface
   public void moveBackward(int speed) {
     mActivity.runOnUiThread(() -> binding.jsCommand.setText("Move Backward at " + speed));
-    double speedResult = (double) speed / (double) vehicle.getSpeedMultiplier();
-    vehicle.setControl((float) -speedResult, (float) -speedResult);
+    vehicle.setControl(0.f, (float) -speed);
   }
 
   @JavascriptInterface
   public void moveLeft(int speed) {
     mActivity.runOnUiThread(() -> binding.jsCommand.setText("Move Left at + " + speed));
-    double speedResult = (double) speed / (double) vehicle.getSpeedMultiplier();
-    vehicle.setControl(0, (float) speedResult);
+    vehicle.setControl(-Control.MAX, (float) speed);
   }
 
   @JavascriptInterface
   public void moveRight(int speed) {
     mActivity.runOnUiThread(() -> binding.jsCommand.setText("Move Right at + " + speed));
-    double speedResult = (double) speed / (double) vehicle.getSpeedMultiplier();
-    vehicle.setControl((float) speedResult, 0);
+    vehicle.setControl(Control.MAX, (float) speed);
   }
 
   @JavascriptInterface
@@ -115,9 +112,8 @@ public class BotFunctions implements SensorEventListener {
         () ->
             binding.jsCommand.setText(
                 "Move Left at " + leftSpeed + " Move Right at " + rightSpeed));
-    double leftSpeedResult = (double) leftSpeed / (double) vehicle.getSpeedMultiplier();
-    double rightSpeedResult = (double) rightSpeed / (double) vehicle.getSpeedMultiplier();
-    vehicle.setControl((float) leftSpeedResult, (float) rightSpeedResult);
+    vehicle.setControl(
+        Control.fromLeftRight(leftSpeed / Control.MAX, rightSpeed / Control.MAX));
   }
 
   //    @JavascriptInterface

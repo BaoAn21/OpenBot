@@ -92,7 +92,9 @@ public class Autopilot extends Network {
     Timber.v("Timecost to run model inference: %s", (endTime - startTime));
 
     Trace.endSection(); // "recognizeImage"
-    return new Control(predicted_ctrl[0][0], predicted_ctrl[0][1]);
+    // Model output is (steering, throttle) directly, not a differential-drive (left, right)
+    // pair, so it maps straight onto Control's raw-unit constructor instead of fromLeftRight.
+    return new Control(predicted_ctrl[0][0] * Control.MAX, predicted_ctrl[0][1] * Control.MAX);
   }
 
   @Override

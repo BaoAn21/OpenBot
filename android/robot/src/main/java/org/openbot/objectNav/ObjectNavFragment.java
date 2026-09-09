@@ -41,6 +41,7 @@ import org.openbot.R;
 import org.openbot.common.CameraFragment;
 import org.openbot.databinding.FragmentObjectNavBinding;
 import org.openbot.env.BorderedText;
+import org.openbot.env.BotToControllerEventBus;
 import org.openbot.env.ImageUtils;
 import org.openbot.mqtt.MqttService;
 import org.openbot.tflite.Detector;
@@ -48,6 +49,7 @@ import org.openbot.tflite.Model;
 import org.openbot.tflite.Network;
 import org.openbot.tracking.MultiBoxTracker;
 import org.openbot.utils.CameraUtils;
+import org.openbot.utils.ConnectionUtils;
 import org.openbot.utils.Constants;
 import org.openbot.utils.Enums;
 import org.openbot.utils.MovingAverage;
@@ -111,11 +113,20 @@ public class ObjectNavFragment extends CameraFragment {
   }
 
   @Override
+  public void onDestroyView() {
+    super.onDestroyView();
+    BotToControllerEventBus.emitEvent(
+        ConnectionUtils.createStatus("FRAGMENT_TYPE", "CLOSE"));
+  }
+
+
+  @Override
   public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
     super.onViewCreated(view, savedInstanceState);
-
+    BotToControllerEventBus.emitEvent(
+        ConnectionUtils.createStatus(
+            "FRAGMENT_TYPE", Enums.FragmentType.OBJECTDETECTION.getFragment()));
     binding.confidenceValue.setText((int) (MINIMUM_CONFIDENCE_TF_OD_API * 100) + "%");
-
     binding.plusConfidence.setOnClickListener(
         v -> {
           String trimConfValue = binding.confidenceValue.getText().toString().trim();
@@ -157,7 +168,7 @@ public class ObjectNavFragment extends CameraFragment {
           @Override
           public void onNothingSelected(AdapterView<?> parent) {}
         });
-    binding.deviceSpinner.setSelection(preferencesManager.getDevice());
+    initDeviceSpinner(binding.deviceSpinner, preferencesManager.getDevice());
     setNumThreads(preferencesManager.getNumThreads());
     binding.threads.setText(String.valueOf(getNumThreads()));
 
@@ -355,10 +366,8 @@ public class ObjectNavFragment extends CameraFragment {
           .runOnUiThread(
               () -> {
                 ArrayAdapter<String> adapter =
-                    new ArrayAdapter<>(
-                        getContext(),
-                        android.R.layout.simple_dropdown_item_1line,
-                        detector.getLabels());
+                    new ArrayAdapter<>(getContext(), R.layout.spinner_item, detector.getLabels());
+                adapter.setDropDownViewResource(android.R.layout.simple_dropdown_item_1line);
                 binding.classType.setAdapter(adapter);
                 binding.classType.setSelection(
                     detector.getLabels().indexOf(preferencesManager.getObjectType()));
@@ -431,13 +440,20 @@ public class ObjectNavFragment extends CameraFragment {
     switch (commandType) {
       case Constants.CMD_DRIVE:
         binding.controllerContainer.controlInfo.setText(
-            String.format(Locale.US, "%.0f,%.0f", vehicle.getLeftSpeed(), vehicle.getRightSpeed()));
+            String.format(Locale.US, "%.0f,%.0f", vehicle.getSteering(), vehicle.getThrottle()));
         break;
 
-      case Constants.CMD_NETWORK:
-        setNetworkEnabledWithAudio(!binding.autoSwitch.isChecked());
-        break;
     }
+  }
+
+  @Override
+  protected void handleNetworkCommand() {
+    setNetworkEnabledWithAudio(!binding.autoSwitch.isChecked());
+  }
+
+  @Override
+  protected boolean isNetworkModeEnabled() {
+    return binding.autoSwitch.isChecked();
   }
 
   private void setNetworkEnabledWithAudio(boolean b) {
@@ -449,6 +465,7 @@ public class ObjectNavFragment extends CameraFragment {
 
   private void setNetworkEnabled(boolean b) {
     binding.autoSwitch.setChecked(b);
+    emitNetworkStatus(b);
 
     binding.controllerContainer.controlMode.setEnabled(!b);
     binding.controllerContainer.driveMode.setEnabled(!b);
@@ -561,13 +578,13 @@ public class ObjectNavFragment extends CameraFragment {
 
   protected void handleDriveCommand(Control control) {
     vehicle.setControl(control);
-    float left = vehicle.getLeftSpeed();
-    float right = vehicle.getRightSpeed();
+    float steering = vehicle.getSteering();
+    float throttle = vehicle.getThrottle();
     requireActivity()
         .runOnUiThread(
             () ->
                 binding.controllerContainer.controlInfo.setText(
-                    String.format(Locale.US, "%.0f,%.0f", left, right)));
+                    String.format(Locale.US, "%.0f,%.0f", steering, throttle)));
   }
 
   protected Model getModel() {

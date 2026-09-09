@@ -12,6 +12,7 @@ import org.jetbrains.annotations.NotNull;
 import org.openbot.R;
 import org.openbot.common.ControlsFragment;
 import org.openbot.databinding.FragmentRobotInfoBinding;
+import org.openbot.vehicle.Control;
 
 public class RobotInfoFragment extends ControlsFragment {
   private FragmentRobotInfoBinding binding;
@@ -28,10 +29,32 @@ public class RobotInfoFragment extends ControlsFragment {
   public void onViewCreated(@NotNull View view, @Nullable Bundle savedInstanceState) {
     super.onViewCreated(view, savedInstanceState);
 
-    if (vehicle.getConnectionType().equals("USB")) {
+    if (vehicle == null) {
+      mViewModel
+          .getVehicle()
+          .observe(
+              getViewLifecycleOwner(),
+              v -> {
+                if (v != null && vehicle == null) {
+                  vehicle = v;
+                  setupRobotInfoUi();
+                }
+              });
+      return;
+    }
+    setupRobotInfoUi();
+  }
+
+  private void setupRobotInfoUi() {
+    if (vehicle == null || binding == null) {
+      return;
+    }
+
+    String connectionType = vehicle.getConnectionType();
+    if (connectionType != null && connectionType.equals("USB")) {
       binding.usbToggle.setVisibility(View.VISIBLE);
       binding.bleToggle.setVisibility(View.GONE);
-    } else if (vehicle.getConnectionType().equals("Bluetooth")) {
+    } else if (connectionType != null && connectionType.equals("Bluetooth")) {
       binding.bleToggle.setVisibility(View.VISIBLE);
       binding.usbToggle.setVisibility(View.GONE);
     }
@@ -64,9 +87,9 @@ public class RobotInfoFragment extends ControlsFragment {
           vehicle.sendLightIntensity(value / 100, value / 100);
         });
 
-    binding.motorsForwardButton.setOnClickListener(v -> vehicle.setControl(0.75f, 0.75f));
+    binding.motorsForwardButton.setOnClickListener(v -> vehicle.setControl(0.f, 0.75f * Control.MAX));
 
-    binding.motorsBackwardButton.setOnClickListener(v -> vehicle.setControl(-0.75f, -0.75f));
+    binding.motorsBackwardButton.setOnClickListener(v -> vehicle.setControl(0.f, -0.75f * Control.MAX));
 
     binding.motorsStopButton.setOnClickListener(v -> vehicle.setControl(0.0f, 0.0f));
 
@@ -74,6 +97,9 @@ public class RobotInfoFragment extends ControlsFragment {
   }
 
   private void refreshGui() {
+    if (vehicle == null || binding == null) {
+      return;
+    }
     updateGui(false);
     binding.refreshToggle.setChecked(false);
     if (vehicle.isReady()) {
@@ -149,6 +175,9 @@ public class RobotInfoFragment extends ControlsFragment {
 
   @Override
   protected void processUSBData(String data) {
+    if (vehicle == null || binding == null) {
+      return;
+    }
     if (!vehicle.isReady()) {
       vehicle.setReady(true);
       vehicle.requestVehicleConfig();

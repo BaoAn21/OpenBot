@@ -687,7 +687,7 @@ public class BlocklyExecutingFragment extends CameraFragment implements ArCoreLi
                 navigationPolicy.recognizeImage(
                         bitmap, goalDistance, (float) Math.sin(deltaYaw), (float) Math.cos(deltaYaw));
 
-        Timber.d("control: (" + control.getLeft() + ", " + control.getRight() + ")");
+        Timber.d("control: (" + control.getSteering() + ", " + control.getThrottle() + ")");
         vehicle.setControl(control);
       }
     }

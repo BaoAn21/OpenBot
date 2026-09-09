@@ -85,7 +85,31 @@ public class LoggerFragment extends CameraFragment {
   @Override
   public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
     super.onViewCreated(view, savedInstanceState);
+    BotToControllerEventBus.emitEvent(
+        ConnectionUtils.createStatus(
+            "FRAGMENT_TYPE", Enums.FragmentType.DATACOLLECTION.getFragment()));
     binding.controllerContainer.speedInfo.setText(getString(R.string.speedInfo, "---,---"));
+
+    if (vehicle == null) {
+      mViewModel
+          .getVehicle()
+          .observe(
+              getViewLifecycleOwner(),
+              v -> {
+                if (v != null && vehicle == null) {
+                  vehicle = v;
+                  setupLoggerUi();
+                }
+              });
+      return;
+    }
+    setupLoggerUi();
+  }
+
+  private void setupLoggerUi() {
+    if (vehicle == null || binding == null) {
+      return;
+    }
 
     intentSensorService = new Intent(requireActivity(), SensorService.class);
     setSpeedMode(Enums.SpeedMode.getByID(preferencesManager.getSpeedMode()));
@@ -113,10 +137,11 @@ public class LoggerFragment extends CameraFragment {
       }
     });
 
-    if (vehicle.getConnectionType().equals("USB")) {
+    String connectionType = vehicle.getConnectionType();
+    if (connectionType != null && connectionType.equals("USB")) {
       binding.usbToggle.setVisibility(View.VISIBLE);
       binding.bleToggle.setVisibility(View.GONE);
-    } else if (vehicle.getConnectionType().equals("Bluetooth")) {
+    } else if (connectionType != null && connectionType.equals("Bluetooth")) {
       binding.bleToggle.setVisibility(View.VISIBLE);
       binding.usbToggle.setVisibility(View.GONE);
     }
@@ -150,6 +175,8 @@ public class LoggerFragment extends CameraFragment {
     List<String> models = getModelNames(f -> f.pathType != Model.PATH_TYPE.URL);
     initModelSpinner(binding.modelSpinner, models, "");
     initServerSpinner(binding.serverSpinner);
+    initArraySpinner(binding.saveAs, R.array.save_data);
+    initArraySpinner(binding.resolutionSpinner, R.array.preview_resolutions);
 
     binding.saveAs.setOnItemSelectedListener( new AdapterView.OnItemSelectedListener() {
 
@@ -250,7 +277,9 @@ public class LoggerFragment extends CameraFragment {
     handlerThread = new HandlerThread("logging");
     handlerThread.start();
     handler = new Handler(handlerThread.getLooper());
-    binding.bleToggle.setChecked(vehicle.bleConnected());
+    if (vehicle != null && binding != null) {
+      binding.bleToggle.setChecked(vehicle.bleConnected());
+    }
     super.onResume();
   }
 
@@ -265,6 +294,13 @@ public class LoggerFragment extends CameraFragment {
       e.printStackTrace();
     }
     super.onPause();
+  }
+
+  @Override
+  public void onDestroyView() {
+    super.onDestroyView();
+    BotToControllerEventBus.emitEvent(
+        ConnectionUtils.createStatus("FRAGMENT_TYPE", "CLOSE"));
   }
 
   protected synchronized void runInBackground(final Runnable r) {
@@ -305,7 +341,7 @@ public class LoggerFragment extends CameraFragment {
       try {
         sensorMessenger.send(
             LogDataUtils.generateControlDataMessage(
-                (int) vehicle.getLeftSpeed(), (int) vehicle.getRightSpeed()));
+                (int) vehicle.getSteering(), (int) vehicle.getThrottle()));
       } catch (RemoteException e) {
         e.printStackTrace();
       }
@@ -504,17 +540,24 @@ public class LoggerFragment extends CameraFragment {
                 Enums.Direction.UP.getValue(),
                 Enums.SpeedMode.getByID(preferencesManager.getSpeedMode())));
         break;
-      case Constants.CMD_NETWORK:
-        cancelLogging();
-        break;
     }
   }
 
+  @Override
+  protected void handleNetworkCommand() {
+    cancelLogging();
+  }
+
+  @Override
+  protected boolean isLoggingEnabledForStatus() {
+    return loggingEnabled;
+  }
+
   protected void handleDriveCommand() {
-    float left = vehicle.getLeftSpeed();
-    float right = vehicle.getRightSpeed();
+    float steering = vehicle.getSteering();
+    float throttle = vehicle.getThrottle();
     binding.controllerContainer.controlInfo.setText(
-        String.format(Locale.US, "%.0f,%.0f", left, right));
+        String.format(Locale.US, "%.0f,%.0f", steering, throttle));
     runInBackground(this::sendControlToSensorService);
   }
 
