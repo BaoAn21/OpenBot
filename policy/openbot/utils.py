@@ -83,7 +83,9 @@ def show_batch(dataset, policy="autopilot", model=None, fig_num=1):
 
     for n in range(NUM_SAMPLES):
         ax = plt.subplot(5, 3, n + 1)
-        plt.imshow(image_batch[n])
+        # For stacked-frame inputs only the newest frame (the last three channels) is
+        # shown; it is the one the label belongs to.
+        plt.imshow(image_batch[n][..., -3:])
         if model is None:
             plt.title(
                 "%s: %s, Label: [%.2f %.2f]"

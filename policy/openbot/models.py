@@ -113,6 +113,52 @@ def pilot_net(img_width, img_height, bn=False, policy="autopilot"):
     return model
 
 
+def _pilot_net_head(cnn, mlp, name):
+    """The pilot_net output stack, shared by the single-frame and sequence variants."""
+    combinedInput = tf.keras.layers.concatenate([mlp.output, cnn.output])
+
+    x = tf.keras.layers.Dense(50, activation="relu")(combinedInput)
+    x = tf.keras.layers.concatenate([mlp.input, x])
+    x = tf.keras.layers.Dense(10, activation="relu")(x)
+    x = tf.keras.layers.concatenate([mlp.input, x])
+    x = tf.keras.layers.Dense(2, activation="linear")(x)
+
+    return tf.keras.Model(name=name, inputs=(cnn.input, mlp.input), outputs=x)
+
+
+def _autopilot_mlp(policy):
+    if policy == "autopilot":
+        return create_mlp(1, 1, 1, dropout=0, name="cmd")
+    elif policy == "point_goal_nav":
+        return create_mlp(3, 16, 16, dropout=0, name="goal")
+    raise Exception("Unknown policy")
+
+
+def pilot_net_seq(img_width, img_height, bn=False, policy="autopilot", seq_len=5):
+    """pilot_net over a stack of seq_len frames fused at the input (early fusion).
+
+    The only structural difference from pilot_net is the input depth: the frames are
+    concatenated along the channel axis, so the first convolution sees all of them at
+    once and can pick up apparent motion. Everything after that is unchanged, which
+    keeps the op set (and the inference cost) essentially identical to the
+    single-frame model - only the first conv kernel grows.
+    """
+    cnn = create_cnn(
+        img_width,
+        img_height,
+        3 * seq_len,
+        cnn_filters=(24, 36, 48, 64, 64),
+        kernel_sz=(5, 5, 5, 3, 3),
+        stride=(2, 2, 2, 1, 1),
+        padding="valid",
+        activation="relu",
+        mlp_filters=(1164, 100),
+        mlp_dropout=0,
+        bn=bn,
+    )
+    return _pilot_net_head(cnn, _autopilot_mlp(policy), "pilot_net_seq")
+
+
 def cil_mobile(img_width, img_height, bn=True, policy="autopilot"):
     if policy == "autopilot":
         mlp = create_mlp(1, 16, 16, dropout=0.5, name="cmd")

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import inspect
 import os
 import re
 import threading
@@ -19,6 +20,7 @@ from . import (
     models,
     models_dir,
     tfrecord,
+    tfrecord_seq,
     tfrecord_utils,
     utils,
 )
@@ -58,9 +60,26 @@ class Hyperparameters:
     FLIP_AUG: bool = False
     CMD_AUG: bool = False
 
+    # Frame offsets back from the current frame, comma separated and starting at 0
+    # (each step is one timeline position). Empty means the single-frame policy.
+    SEQ_OFFSETS: str = ""
+    # Drop leading/trailing stationary runs and cut interior ones to KEEP_STATIONARY.
+    TRIM_STATIONARY: bool = False
+    KEEP_STATIONARY: int = tfrecord_seq.DEFAULT_KEEP_STATIONARY
+
     USE_LAST: bool = False
 
     WANDB: bool = False
+
+    @property
+    def seq_offsets(self):
+        if not self.SEQ_OFFSETS:
+            return (0,)
+        return tfrecord_seq.parse_offsets(self.SEQ_OFFSETS)
+
+    @property
+    def SEQ_LEN(self):
+        return len(self.seq_offsets)
 
     @classmethod
     def parse(cls, name):
@@ -84,6 +103,12 @@ class Hyperparameters:
             model_name += "_flip"
         if self.CMD_AUG:
             model_name += "_cmd"
+        if self.SEQ_LEN > 1:
+            # Part of the name so runs with different window shapes cannot land in
+            # the same checkpoint directory.
+            model_name += "_seq" + tfrecord_seq.offsets_tag(self.seq_offsets)
+            if self.TRIM_STATIONARY:
+                model_name += f"_trim{self.KEEP_STATIONARY}"
 
         return model_name
 
@@ -195,6 +220,12 @@ def process_data(tr: Training):
 
 
 def load_tfrecord(tr: Training, verbose=0):
+    seq_len = tr.hyperparameters.SEQ_LEN
+    if seq_len > 1:
+        autopilot_parse_fn = tfrecord_seq.make_parse_fn(seq_len)
+    else:
+        autopilot_parse_fn = tfrecord_utils.parse_tfrecord_fn_autopilot
+
     def process_train_sample(features):
         # image = tf.image.resize(features["image"], size=(224, 224))
         image = features["image"]
@@ -202,7 +233,7 @@ def load_tfrecord(tr: Training, verbose=0):
         if tr.hyperparameters.POLICY == "autopilot":
             cmd_input = features["cmd"]
             label = [features["left"], features["right"]]
-            image = data_augmentation.augment_img(image)
+            image = data_augmentation.augment_img_seq(image, seq_len)
             if tr.hyperparameters.FLIP_AUG:
                 image, cmd_input, label = data_augmentation.flip_sample(
                     image, cmd_input, label
@@ -245,9 +276,7 @@ def load_tfrecord(tr: Training, verbose=0):
     if tr.hyperparameters.POLICY == "autopilot":
         train_dataset = (
             tf.data.TFRecordDataset(tr.train_data_dir, num_parallel_reads=AUTOTUNE)
-            .map(
-                tfrecord_utils.parse_tfrecord_fn_autopilot, num_parallel_calls=AUTOTUNE
-            )
+            .map(autopilot_parse_fn, num_parallel_calls=AUTOTUNE)
             .map(process_train_sample, num_parallel_calls=AUTOTUNE)
         )
     elif tr.hyperparameters.POLICY == "point_goal_nav":
@@ -272,9 +301,7 @@ def load_tfrecord(tr: Training, verbose=0):
     if tr.hyperparameters.POLICY == "autopilot":
         test_dataset = (
             tf.data.TFRecordDataset(tr.test_data_dir, num_parallel_reads=AUTOTUNE)
-            .map(
-                tfrecord_utils.parse_tfrecord_fn_autopilot, num_parallel_calls=AUTOTUNE
-            )
+            .map(autopilot_parse_fn, num_parallel_calls=AUTOTUNE)
             .map(process_test_sample, num_parallel_calls=AUTOTUNE)
         )
     elif tr.hyperparameters.POLICY == "point_goal_nav":
@@ -375,7 +402,13 @@ def load_data(tr: Training, verbose=0):
 
 def visualize_train_data(tr: Training):
     utils.show_batch(dataset=tr.train_ds, policy=tr.hyperparameters.POLICY, model=None)
-    utils.savefig(os.path.join(models_dir, "train_preview.png"))
+    try:
+        utils.savefig(os.path.join(models_dir, "train_preview.png"))
+    except OSError as err:
+        # This preview lands in a path shared by every run, so it can be left behind
+        # owned by another user (a docker run as root, for instance). It is a
+        # debugging aid - not worth losing a training run over.
+        print(f"Could not write train preview, continuing anyway: {err}")
 
 
 def do_training(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0):
@@ -386,6 +419,8 @@ def do_training(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0):
     tr.custom_objects = {
         "direction_metric": metrics.direction_metric,
         "angle_metric": metrics.angle_metric,
+        "throttle_metric": metrics.throttle_metric,
+        "throttle_direction_metric": metrics.throttle_direction_metric,
     }
 
     if tr.hyperparameters.WANDB:
@@ -427,11 +462,18 @@ def do_training(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0):
             raise
 
     if not resume_training:
-        model = getattr(models, tr.hyperparameters.MODEL)(
+        build_model = getattr(models, tr.hyperparameters.MODEL)
+        model_kwargs = {}
+        # Only the sequence architectures take seq_len; the single-frame ones keep
+        # their original four-argument signature.
+        if "seq_len" in inspect.signature(build_model).parameters:
+            model_kwargs["seq_len"] = tr.hyperparameters.SEQ_LEN
+        model = build_model(
             tr.NETWORK_IMG_WIDTH,
             tr.NETWORK_IMG_HEIGHT,
             tr.hyperparameters.BATCH_NORM,
             tr.hyperparameters.POLICY,
+            **model_kwargs,
         )
         # Define the directory where the model image should be saved (if not already created)
         model_dir = os.path.join(models_dir, tr.model_name)
@@ -450,6 +492,8 @@ def do_training(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0):
         "mean_absolute_error",
         tr.custom_objects["direction_metric"],
         tr.custom_objects["angle_metric"],
+        tr.custom_objects["throttle_metric"],
+        tr.custom_objects["throttle_direction_metric"],
     ]
     optimizer = tf.keras.optimizers.Adam(learning_rate=tr.hyperparameters.LEARNING_RATE)
 
@@ -535,6 +579,42 @@ def do_evaluation(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0
     plt.legend(loc="lower right")
     utils.savefig(os.path.join(tr.log_path, "angle.png"))
 
+    plt.figure().gca().xaxis.get_major_locator().set_params(integer=True)
+    plt.plot(x, tr.history.history["throttle_metric"], label="throttle_metric")
+    plt.plot(x, tr.history.history["val_throttle_metric"], label="val_throttle_metric")
+    plt.plot(
+        x,
+        tr.history.history["throttle_direction_metric"],
+        label="throttle_direction_metric",
+    )
+    plt.plot(
+        x,
+        tr.history.history["val_throttle_direction_metric"],
+        label="val_throttle_direction_metric",
+    )
+    plt.xlabel("Epoch")
+    plt.ylabel("Throttle Metric")
+    plt.legend(loc="lower right")
+    utils.savefig(os.path.join(tr.log_path, "throttle.png"))
+
+    def summarize(title, index):
+        h = tr.history.history
+        print(
+            "%s - angle: %.4f, val_angle: %.4f, direction: %.4f, val_direction: %.4f, "
+            "throttle: %.4f, val_throttle: %.4f, throttle_dir: %.4f, val_throttle_dir: %.4f"
+            % (
+                title,
+                h["angle_metric"][index],
+                h["val_angle_metric"][index],
+                h["direction_metric"][index],
+                h["val_direction_metric"][index],
+                h["throttle_metric"][index],
+                h["val_throttle_metric"][index],
+                h["throttle_direction_metric"][index],
+                h["val_throttle_direction_metric"][index],
+            )
+        )
+
     callback.broadcast("message", "Generate tflite models...")
     checkpoint_path = tr.checkpoint_path
     print("checkpoint_path", checkpoint_path)
@@ -543,45 +623,19 @@ def do_evaluation(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0
     best_train_tflite = utils.generate_tflite(tr.checkpoint_path, best_train_checkpoint)
     utils.save_tflite(best_train_tflite, tr.checkpoint_path, "best-train")
     best_train_index = np.argmin(np.array(tr.history.history["loss"]))
-    print(
-        "Best Train Checkpoint (epoch %s) - angle: %.4f, val_angle: %.4f, direction: %.4f, val_direction: %.4f"
-        % (
-            best_train_index,
-            tr.history.history["angle_metric"][best_train_index],
-            tr.history.history["val_angle_metric"][best_train_index],
-            tr.history.history["direction_metric"][best_train_index],
-            tr.history.history["val_direction_metric"][best_train_index],
-        )
-    )
+    summarize("Best Train Checkpoint (epoch %s)" % best_train_index, best_train_index)
 
     best_val_checkpoint = "cp-best-val.ckpt"
     best_val_tflite = utils.generate_tflite(tr.checkpoint_path, best_val_checkpoint)
     utils.save_tflite(best_val_tflite, tr.checkpoint_path, "best")
     utils.save_tflite(best_val_tflite, tr.checkpoint_path, "best-val")
     best_val_index = np.argmin(np.array(tr.history.history["val_loss"]))
-    print(
-        "Best Val Checkpoint (epoch %s) - angle: %.4f, val_angle: %.4f, direction: %.4f, val_direction: %.4f"
-        % (
-            best_val_index,
-            tr.history.history["angle_metric"][best_val_index],
-            tr.history.history["val_angle_metric"][best_val_index],
-            tr.history.history["direction_metric"][best_val_index],
-            tr.history.history["val_direction_metric"][best_val_index],
-        )
-    )
+    summarize("Best Val Checkpoint (epoch %s)" % best_val_index, best_val_index)
 
     last_checkpoint = "cp-last.ckpt"
     last_tflite = utils.generate_tflite(tr.checkpoint_path, last_checkpoint)
     utils.save_tflite(last_tflite, tr.checkpoint_path, "last")
-    print(
-        "Last Checkpoint - angle: %.4f, val_angle: %.4f, direction: %.4f, val_direction: %.4f"
-        % (
-            tr.history.history["angle_metric"][-1],
-            tr.history.history["val_angle_metric"][-1],
-            tr.history.history["direction_metric"][-1],
-            tr.history.history["val_direction_metric"][-1],
-        )
-    )
+    summarize("Last Checkpoint", -1)
 
     callback.broadcast("message", "Evaluate model...")
     last_model = utils.load_model(
@@ -605,6 +659,23 @@ def do_evaluation(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0
     utils.compare_tf_tflite(last_model, last_tflite, policy=tr.hyperparameters.POLICY)
 
 
+def tfrecords_path(params: Hyperparameters):
+    """Where the tfrecords for this configuration live.
+
+    Multi-frame records go in their own directory named after the window shape, so
+    changing seq_len or seq_stride can never silently reuse records built for a
+    different one.
+    """
+    if params.SEQ_LEN > 1:
+        return os.path.join(
+            dataset_dir,
+            tfrecord_seq.tfrecords_dir_name(
+                params.seq_offsets, params.TRIM_STATIONARY, params.KEEP_STATIONARY
+            ),
+        )
+    return os.path.join(dataset_dir, "tfrecords")
+
+
 def start_train(
     params: Hyperparameters, callback: MyCallback, verbose=0, no_tf_record=False
 ):
@@ -618,8 +689,22 @@ def start_train(
         load_data(tr, verbose)
     else:
         callback.broadcast("message", "Loading data from tfrecord...")
-        tr.train_data_dir = os.path.join(dataset_dir, "tfrecords/train.tfrec")
-        tr.test_data_dir = os.path.join(dataset_dir, "tfrecords/test.tfrec")
+        records_dir = tfrecords_path(params)
+        tr.train_data_dir = os.path.join(records_dir, "train.tfrec")
+        tr.test_data_dir = os.path.join(records_dir, "test.tfrec")
+        if not os.path.isfile(tr.train_data_dir):
+            if params.SEQ_LEN > 1:
+                hint = f"python -m openbot.tfrecord_seq --seq_offsets {params.SEQ_OFFSETS}"
+                if params.TRIM_STATIONARY:
+                    hint += (
+                        f" --trim_stationary --keep_stationary "
+                        f"{params.KEEP_STATIONARY}"
+                    )
+            else:
+                hint = "rerun with --create_tf_record"
+            raise FileNotFoundError(
+                f"No tfrecords at {tr.train_data_dir}. Build them first: {hint}"
+            )
         load_tfrecord(tr, verbose)
 
     visualize_train_data(tr)
@@ -630,10 +715,24 @@ def start_train(
     return tr
 
 
-def create_tfrecord(callback: MyCallback, policy="autopilot"):
+def create_tfrecord(callback: MyCallback, policy="autopilot", params=None):
     callback.broadcast(
         "message", "Converting data to tfrecord (this may take some time)..."
     )
+
+    if params is not None and params.SEQ_LEN > 1:
+        out_dir = tfrecords_path(params)
+        for split, name in (("train_data", "train.tfrec"), ("test_data", "test.tfrec")):
+            tfrecord_seq.convert_dataset(
+                os.path.join(dataset_dir, split),
+                out_dir,
+                name,
+                params.seq_offsets,
+                params.TRIM_STATIONARY,
+                params.KEEP_STATIONARY,
+            )
+        return
+
     tfrecord.convert_dataset(
         os.path.join(dataset_dir, "train_data"),
         os.path.join(dataset_dir, "tfrecords"),
@@ -662,8 +761,48 @@ if __name__ == "__main__":
         "--model",
         type=str,
         default="pilot_net",
-        choices=["cil_mobile", "cil_mobile_fast", "cil", "pilot_net"],
+        choices=[
+            "cil_mobile",
+            "cil_mobile_fast",
+            "cil",
+            "pilot_net",
+            "pilot_net_seq",
+        ],
         help="network architecture (default: pilot_net)",
+    )
+    parser.add_argument(
+        "--seq_offsets",
+        type=str,
+        default=None,
+        help="stacked-frame policy: comma separated frame offsets back from the "
+        "current frame, starting at 0 (e.g. 0,2,5,12,24). Each step is one recorded "
+        "frame, ~33ms. Omit for the single-frame policy",
+    )
+    parser.add_argument(
+        "--seq_len",
+        type=int,
+        default=None,
+        help="stacked-frame policy with uniform spacing: number of frames "
+        "(use with --seq_stride instead of --seq_offsets)",
+    )
+    parser.add_argument(
+        "--seq_stride",
+        type=int,
+        default=None,
+        help="stacked-frame policy with uniform spacing: gap between frames",
+    )
+    parser.add_argument(
+        "--trim_stationary",
+        action="store_true",
+        help="stacked-frame policy: drop leading and trailing stationary runs and "
+        "cut interior ones to --keep_stationary frames",
+    )
+    parser.add_argument(
+        "--keep_stationary",
+        type=int,
+        default=tfrecord_seq.DEFAULT_KEEP_STATIONARY,
+        help="frames to keep from an interior stationary run when trimming "
+        f"(default: {tfrecord_seq.DEFAULT_KEEP_STATIONARY})",
     )
     parser.add_argument(
         "--batch_size",
@@ -717,9 +856,30 @@ if __name__ == "__main__":
     params.BATCH_NORM = args.batch_norm
     params.FLIP_AUG = args.flip_aug
     params.CMD_AUG = args.cmd_aug
+    if args.seq_offsets or args.seq_len:
+        try:
+            offsets = tfrecord_seq.resolve_offsets(
+                args.seq_offsets, args.seq_len, args.seq_stride
+            )
+        except ValueError as err:
+            parser.error(str(err))
+        params.SEQ_OFFSETS = tfrecord_seq.offsets_tag(offsets).replace("-", ",")
+
+    params.TRIM_STATIONARY = args.trim_stationary
+    params.KEEP_STATIONARY = args.keep_stationary
     params.USE_LAST = args.resume
     params.WANDB = args.wandb
     params.IS_CROP = args.policy == "point_goal_nav"
+
+    is_seq_model = (
+        "seq_len" in inspect.signature(getattr(models, params.MODEL)).parameters
+    )
+    if params.SEQ_LEN > 1 and not is_seq_model:
+        parser.error(
+            f"stacked frames need --model pilot_net_seq, not {params.MODEL}"
+        )
+    if params.SEQ_LEN == 1 and is_seq_model:
+        parser.error(f"--model {params.MODEL} needs --seq_offsets (or --seq_len)")
 
     def broadcast(event, payload=None):
         print()
@@ -729,6 +889,6 @@ if __name__ == "__main__":
     my_callback = MyCallback(broadcast, event)
 
     if args.create_tf_record:
-        create_tfrecord(my_callback, args.policy)
+        create_tfrecord(my_callback, args.policy, params)
 
     start_train(params, my_callback, verbose=1, no_tf_record=args.no_tf_record)
