@@ -2,6 +2,7 @@ package org.openbot.tflite;
 
 import android.util.Size;
 import com.google.gson.annotations.SerializedName;
+import java.util.EnumSet;
 
 /** The model. */
 public class Model {
@@ -26,6 +27,7 @@ public class Model {
 
   public enum CLASS {
     AUTOPILOT,
+    AUTOPILOT_SEQ,
     MOBILENET,
     EFFICIENTDET,
     YOLOV4,
@@ -35,8 +37,29 @@ public class Model {
 
   public enum TYPE {
     CMDNAV,
+    CMDNAV_SEQ,
     DETECTOR,
     GOALNAV,
+  }
+
+  /**
+   * The classes that can implement a given type. Used to keep the class spinner in the model editor
+   * in sync with the type spinner, so a model cannot be tagged with a combination no fragment knows
+   * how to load.
+   */
+  public static EnumSet<CLASS> classesFor(TYPE type) {
+    switch (type) {
+      case CMDNAV:
+        return EnumSet.of(CLASS.AUTOPILOT);
+      case CMDNAV_SEQ:
+        return EnumSet.of(CLASS.AUTOPILOT_SEQ);
+      case GOALNAV:
+        return EnumSet.of(CLASS.NAVIGATION);
+      case DETECTOR:
+        return EnumSet.of(CLASS.MOBILENET, CLASS.EFFICIENTDET, CLASS.YOLOV4, CLASS.YOLOV5);
+      default:
+        return EnumSet.noneOf(CLASS.class);
+    }
   }
 
   public enum PATH_TYPE {

@@ -28,6 +28,7 @@ public class SharedPreferencesManager {
   private static final String DEFAULT_MODEL = "DEFAULT_MODEL_NAME";
   private static final String OBJECT_NAV_MODEL = "OBJECT_NAV_MODEL_NAME";
   private static final String AUTOPILOT_MODEL = "AUTOPILOT_MODEL_NAME";
+  private static final String AUTOPILOT_SEQ_MODEL = "AUTOPILOT_SEQ_MODEL_NAME";
   private static final String SERVER_NAME = "SERVER_NAME";
 
   private static final String OBJECT_TYPE = "OBJECT_TYPE";
@@ -118,6 +119,14 @@ public class SharedPreferencesManager {
 
   public String getAutopilotModel() {
     return preferences.getString(AUTOPILOT_MODEL, "");
+  }
+
+  public void setAutopilotSeqModel(String model) {
+    preferences.edit().putString(AUTOPILOT_SEQ_MODEL, model).apply();
+  }
+
+  public String getAutopilotSeqModel() {
+    return preferences.getString(AUTOPILOT_SEQ_MODEL, "");
   }
 
   public void setServer(String server) {

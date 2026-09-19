@@ -81,19 +81,14 @@ public class EditModelDialogFragment extends DialogFragment {
                         String selected = parent.getItemAtPosition(position).toString();
                         classAdapter.clear();
                         classAdapter.addAll(
-                                Arrays.stream(Model.CLASS.values())
+                                Model.classesFor(Model.TYPE.valueOf(selected)).stream()
                                         .map(Enum::toString)
-                                        .filter(
-                                                f ->
-                                                        selected.equals(Model.TYPE.CMDNAV.name())
-                                                                == f.equals(Model.CLASS.AUTOPILOT.toString()))
-                                        .filter(
-                                                f ->
-                                                        selected.equals(Model.TYPE.GOALNAV.name())
-                                                                == f.equals(Model.CLASS.NAVIGATION.toString()))
                                         .collect(Collectors.toList()));
                         classAdapter.notifyDataSetChanged();
-                        binding.classSpinner.setSelection(classAdapter.getPosition(model.classType.toString()));
+                        // The model's current class need not be legal for the newly picked type;
+                        // fall back to the first one that is, so the spinner always has a selection.
+                        binding.classSpinner.setSelection(
+                                Math.max(0, classAdapter.getPosition(model.classType.toString())));
                     }
 
                     @Override

@@ -231,6 +231,8 @@
     <string name="tile_controller_mapping">Controller Mapping</string>
     <string name="tile_robot_info">Robot Info</string>
     <string name="tile_autopilot">Autopilot</string>
+    <string name="tile_autopilot_seq">Autopilot Seq</string>
+    <string name="no_seq_model">No sequence model installed. Add one in Model Management and set its type to CMDNAV_SEQ.</string>
     <string name="tile_object_nav">Object Tracking</string>
     <string name="tile_point_goal_navigation">Point Goal Navigation</string>
     <string name="tile_model_management">Model Management</string>
