@@ -51,6 +51,26 @@ jupyter notebook policy_learning.ipynb       # interactive training/eval
 ./dev.sh                                     # runs `adev runserver openbot/server` (live-reload training dashboard)
 ```
 
+**Training runs in the local conda env, never Docker.** This machine is the GPU
+box (RTX 3050, NVIDIA driver + CUDA already set up), so training is a direct
+`conda activate openbot` + `python -m openbot.train ...` from `policy/` (paths
+like `dataset_dir` in `openbot/utils.py` are relative to the working directory):
+
+```bash
+cd policy
+conda activate openbot
+python -m openbot.train --create_tf_record --model pilot_net \
+    --batch_size 128 --num_epochs 100 --batch_norm
+```
+
+`Dockerfile`, `docker-run-train.sh`, `openbot-train.tar.gz` and
+`TRAINING_ON_PC.md` are leftovers from an earlier setup where training had to be
+shipped from a laptop without a GPU. Don't suggest them. Those runs also left
+root-owned files behind in `policy/dataset` and `policy/models` (the container
+ran as root through a bind mount); a `PermissionError` while writing
+`matched_frame_ctrl.txt` or `train_preview.png` means another one surfaced, and
+the fix is `sudo chown -R sim:sim policy/dataset policy/models`.
+
 `policy/frontend` is a separate CRA app (own `package.json`): `npm start`, `npm run build`, `npm test` inside `policy/frontend`.
 
 ### Embedded-Linux control (`python/`)
