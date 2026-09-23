@@ -131,6 +131,18 @@ npm run build
 
 **Policy training vs. on-device inference.** `policy/` is where models are trained (TensorFlow, `policy/openbot/train.py`, driven from `policy_learning.ipynb`); the resulting model gets exported (e.g. `python/export_openvino.py`) and consumed either by the Android robot app (on-phone inference) or by `python/infer.py` (on-Linux inference via `run.py --mode inference`, selectable backend: `tf`, `tflite`, `openvino`). Data collected in joystick mode (`run.py --mode joystick` or the Android app's data-collection mode) is the training data format `policy/` expects.
 
+**Android layouts are duplicated for landscape.** `android/robot/src/main/res/layout-land/`
+holds landscape variants of 11 layouts (`fragment_autopilot`, `fragment_free_roam`,
+`fragment_logger`, `fragment_object_nav`, `fragment_robot_info`,
+`fragment_controller_mapping`, `fragment_edit_profile`, `fragment_blockly_executing`,
+`fragment_bar_code_scanner`, `dialog_sensors`, `layout_bottom_sheet`). A view added to
+only one variant makes view binding generate the field as `@Nullable` instead of
+`@NonNull`, so it compiles and runs in one orientation and NPEs on rotation. Always add
+a new view to both files, then confirm the field is `@NonNull` in the generated binding
+(`robot/build/.../FragmentXBinding.java`). Note the two variants can differ
+structurally - the landscape autopilot sheet is 400dp pinned to `end`, so a top-center
+overlay that works in portrait lands behind it.
+
 **Localization convention.** Every README, CONTRIBUTING, and DISCLAIMER file exists in multiple language variants (`.de-DE.md`, `.es-ES.md`, `.fr-FR.md`, `.ko-KR.md`, `.zh-CN.md`) alongside the English original. When updating docs, the English file is the source of truth; translations are maintained separately and are not expected to be updated in the same change.
 
 **Driving control is Ackermann-style (steering + throttle), not differential (left/right).** `android/robot/src/main/java/org/openbot/vehicle/Control.java` and `Vehicle.java` represent commands as a `steering`/`throttle` pair in raw device units `[-255, 255]` (`Control.MAX`), not as independent left/right wheel speeds. `Control.fromLeftRight(left, right)` is the conversion point for callers that still produce a normalized differential-drive pair (TFLite models, the object tracker, phone/web controllers) — it maps `(left, right)` in `[-1, 1]` to `(steering, throttle)`. `Vehicle.getLeftSpeed()/getRightSpeed()` no longer exist; use `getSteering()`/`getThrottle()`. The serial protocol to the firmware changed accordingly: `sendControl()` now sends `c<steering>,<throttle>\n` instead of `c<left>,<right>\n`, so this must stay in sync with `firmware/openbot/openbot.ino`'s parsing and with `python/` if it speaks the same protocol.

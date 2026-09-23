@@ -52,6 +52,9 @@
     <string name="speed">Speed (l,r)</string>
     <string name="sonar">Sonar</string>
     <string name="control_info">***,***</string>
+    <string name="indicator_forward">FORWARD · cmd 0</string>
+    <string name="indicator_reverse">REVERSE · cmd 1</string>
+    <string name="indicator_left">LEFT · cmd -1</string>
     <string name="rpm">***,*** rpm</string>
     <string name="voltage">**.* V</string>
     <string name="distance">*** cm</string>

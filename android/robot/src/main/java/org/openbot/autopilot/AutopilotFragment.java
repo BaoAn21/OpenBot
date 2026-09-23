@@ -19,6 +19,7 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.camera.core.ImageProxy;
+import androidx.core.content.ContextCompat;
 import androidx.navigation.Navigation;
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import java.io.IOException;
@@ -95,6 +96,7 @@ public class AutopilotFragment extends CameraFragment {
         setNumThreads(preferencesManager.getNumThreads());
         binding.threads.setText(String.valueOf(getNumThreads()));
         binding.cameraToggle.setOnClickListener(v -> toggleCamera());
+        updateIndicatorInfo();
 
         if (vehicle.getConnectionType().equals("USB")) {
             binding.usbToggle.setVisibility(View.VISIBLE);
@@ -366,7 +368,34 @@ public class AutopilotFragment extends CameraFragment {
                                 Enums.SpeedMode.getByID(preferencesManager.getSpeedMode())));
                 break;
 
+            case Constants.CMD_INDICATOR_LEFT:
+            case Constants.CMD_INDICATOR_RIGHT:
+            case Constants.CMD_INDICATOR_STOP:
+                updateIndicatorInfo();
+                break;
         }
+    }
+
+    /**
+     * Mirrors the indicator on screen. The indicator doubles as the model's cmd input (1 =
+     * reverse), so the raw value is shown next to the label.
+     */
+    private void updateIndicatorInfo() {
+        int indicator = vehicle.getIndicator();
+        int label;
+        int color;
+        if (indicator == Enums.VehicleIndicator.RIGHT.getValue()) {
+            label = R.string.indicator_reverse;
+            color = R.color.indicator;
+        } else if (indicator == Enums.VehicleIndicator.LEFT.getValue()) {
+            label = R.string.indicator_left;
+            color = R.color.red;
+        } else {
+            label = R.string.indicator_forward;
+            color = R.color.green;
+        }
+        binding.indicatorInfo.setText(label);
+        binding.indicatorInfo.setTextColor(ContextCompat.getColor(requireContext(), color));
     }
 
     @Override
@@ -463,9 +492,11 @@ public class AutopilotFragment extends CameraFragment {
         float throttle = vehicle.getThrottle();
         requireActivity()
                 .runOnUiThread(
-                        () ->
-                                binding.controllerContainer.controlInfo.setText(
-                                        String.format(Locale.US, "%.0f,%.0f", steering, throttle)));
+                        () -> {
+                            binding.controllerContainer.controlInfo.setText(
+                                    String.format(Locale.US, "%.0f,%.0f", steering, throttle));
+                            updateIndicatorInfo();
+                        });
     }
 
     @Override
