@@ -25,6 +25,7 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.camera.core.ImageProxy;
+import androidx.core.content.ContextCompat;
 import androidx.navigation.Navigation;
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import com.google.firebase.auth.FirebaseUser;
@@ -171,6 +172,7 @@ public class LoggerFragment extends CameraFragment {
         (buttonView, isChecked) -> setLoggingActive(isChecked));
 
     binding.cameraToggle.setOnClickListener(v -> toggleCamera());
+    updateIndicatorInfo();
 
     List<String> models = getModelNames(f -> f.pathType != Model.PATH_TYPE.URL);
     initModelSpinner(binding.modelSpinner, models, "");
@@ -368,6 +370,25 @@ public class LoggerFragment extends CameraFragment {
     }
   }
 
+  /** Mirrors the indicator on screen, the same as AutopilotFragment. */
+  private void updateIndicatorInfo() {
+    int indicator = vehicle.getIndicator();
+    int label;
+    int color;
+    if (indicator == Enums.VehicleIndicator.RIGHT.getValue()) {
+      label = R.string.indicator_reverse;
+      color = R.color.indicator;
+    } else if (indicator == Enums.VehicleIndicator.LEFT.getValue()) {
+      label = R.string.indicator_left;
+      color = R.color.red;
+    } else {
+      label = R.string.indicator_forward;
+      color = R.color.green;
+    }
+    binding.indicatorInfo.setText(label);
+    binding.indicatorInfo.setTextColor(ContextCompat.getColor(requireContext(), color));
+  }
+
   private void startLogging() {
     logFolder =
         Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
@@ -518,6 +539,7 @@ public class LoggerFragment extends CameraFragment {
       case Constants.CMD_INDICATOR_RIGHT:
       case Constants.CMD_INDICATOR_STOP:
         sendIndicatorToSensorService();
+        updateIndicatorInfo();
         break;
       case Constants.CMD_DRIVE_MODE:
         setDriveMode(Enums.switchDriveMode(vehicle.getDriveMode()));

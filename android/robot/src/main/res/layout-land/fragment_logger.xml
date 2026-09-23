@@ -7,6 +7,20 @@
     android:layout_height="match_parent"
     tools:context=".logging.LoggerFragment">
 
+    <TextView
+        android:id="@+id/indicator_info"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_margin="16dp"
+        android:background="@color/semi_transparent"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="8dp"
+        android:text="@string/indicator_forward"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        tools:textColor="@color/green" />
+
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/loggerBottomSheet"
         android:layout_width="match_parent"
