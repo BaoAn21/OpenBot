@@ -324,6 +324,7 @@ public class FreeRoamFragment extends ControlsFragment {
       case Constants.CMD_INDICATOR_LEFT:
       case Constants.CMD_INDICATOR_RIGHT:
       case Constants.CMD_INDICATOR_STOP:
+      case Constants.CMD_INDICATOR_REVERSE:
         toggleIndicator(vehicle.getIndicator());
         break;
 

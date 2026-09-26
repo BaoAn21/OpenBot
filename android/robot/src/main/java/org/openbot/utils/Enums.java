@@ -163,7 +163,8 @@ public class Enums {
   public enum VehicleIndicator {
     LEFT(-1),
     STOP(0),
-    RIGHT(1);
+    RIGHT(1),
+    REVERSE(2);
 
     private final int value;
 

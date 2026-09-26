@@ -371,24 +371,28 @@ public class AutopilotFragment extends CameraFragment {
             case Constants.CMD_INDICATOR_LEFT:
             case Constants.CMD_INDICATOR_RIGHT:
             case Constants.CMD_INDICATOR_STOP:
+            case Constants.CMD_INDICATOR_REVERSE:
                 updateIndicatorInfo();
                 break;
         }
     }
 
     /**
-     * Mirrors the indicator on screen. The indicator doubles as the model's cmd input (1 =
-     * reverse), so the raw value is shown next to the label.
+     * Mirrors the indicator on screen. The indicator doubles as the model's cmd input (-1 left,
+     * 1 right, 2 reverse), so the raw value is shown next to the label.
      */
     private void updateIndicatorInfo() {
         int indicator = vehicle.getIndicator();
         int label;
         int color;
-        if (indicator == Enums.VehicleIndicator.RIGHT.getValue()) {
-            label = R.string.indicator_reverse;
-            color = R.color.indicator;
-        } else if (indicator == Enums.VehicleIndicator.LEFT.getValue()) {
+        if (indicator == Enums.VehicleIndicator.LEFT.getValue()) {
             label = R.string.indicator_left;
+            color = R.color.indicator;
+        } else if (indicator == Enums.VehicleIndicator.RIGHT.getValue()) {
+            label = R.string.indicator_right;
+            color = R.color.indicator;
+        } else if (indicator == Enums.VehicleIndicator.REVERSE.getValue()) {
+            label = R.string.indicator_reverse;
             color = R.color.red;
         } else {
             label = R.string.indicator_forward;

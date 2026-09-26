@@ -46,6 +46,7 @@ public class Constants {
   public static final String CMD_INDICATOR_LEFT = "INDICATOR_LEFT";
   public static final String CMD_INDICATOR_RIGHT = "INDICATOR_RIGHT";
   public static final String CMD_INDICATOR_STOP = "INDICATOR_STOP";
+  public static final String CMD_INDICATOR_REVERSE = "INDICATOR_REVERSE";
   public static final String CMD_NETWORK = "NETWORK";
   public static final String CMD_DRIVE_MODE = "DRIVE_MODE";
   public static final String CMD_CONNECTED = "CONNECTED";

@@ -356,6 +356,9 @@ public class Vehicle {
       case 1:
         sendStringToDevice(String.format(Locale.US, "i0,1\n"));
         break;
+      case 2:
+        sendStringToDevice(String.format(Locale.US, "i0,0,1\n"));
+        break;
     }
   }
 
