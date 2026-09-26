@@ -75,6 +75,7 @@ int ctrl_steering = 0;
 int ctrl_throttle = 0;
 int indicator_left = 0;
 int indicator_right = 0;
+int indicator_reverse = 0;
 
 unsigned long heartbeat_interval = DEFAULT_HEARTBEAT_MS;
 unsigned long heartbeat_time = 0;
@@ -155,6 +156,8 @@ void process_indicator_msg() {
   tmp = strtok(NULL, ",:");
   if (tmp == NULL) return;
   indicator_right = atoi(tmp);
+  tmp = strtok(NULL, ",:");  // optional third field: reverse light
+  indicator_reverse = tmp == NULL ? 0 : atoi(tmp);
 }
 
 void process_feature_msg() {
@@ -197,71 +200,165 @@ void on_serial_rx() {
 //------------------------------------------------------//
 // DISPLAY
 //------------------------------------------------------//
+// The screen faces backwards on the rear of the car and doubles as the turn signals:
+// sequential amber chevrons on each side, steering/throttle gauges in the middle.
 
-#define BAR_X 110
-#define BAR_W 200
-#define BAR_H 22
+#define SCREEN_W 320
+#define SCREEN_H 170
+
+#define COLOR_BG RGB565_BLACK
+#define COLOR_PANEL RGB565(24, 24, 32)
+#define COLOR_FRAME RGB565(70, 70, 90)
+#define COLOR_LABEL RGB565(150, 150, 170)
+#define COLOR_AMBER RGB565(255, 150, 0)
+#define COLOR_AMBER_DIM RGB565(45, 26, 0)
+#define COLOR_STEER RGB565(0, 200, 255)
+#define COLOR_FWD RGB565(0, 230, 110)
+#define COLOR_REV RGB565(255, 90, 40)
+#define COLOR_REVERSE_DIM RGB565(60, 60, 70)
+
+// Indicator zones on the left and right edges; the gauges live in between.
+#define IND_W 78
+#define CENTER_X IND_W
+#define CENTER_W (SCREEN_W - 2 * IND_W)
+
+// Three chevrons per side, lit one after another like a sequential turn signal.
+#define CHEVRONS 3
+#define CHEV_DX 24       // horizontal reach of each arm
+#define CHEV_DY 52       // vertical reach of each arm
+#define CHEV_T 10        // stroke thickness
+#define CHEV_SPACING 17  // distance between chevrons
+#define BLINK_PERIOD_MS 800
+#define BLINK_STEP_MS 140  // delay before the next chevron lights up
+#define BLINK_ON_MS 500    // all chevrons go dark after this, until the period ends
+
+#define GAUGE_X (CENTER_X + 8)
+#define GAUGE_W (CENTER_W - 16)
+#define BAR_H 16
+
+unsigned long blink_start = 0;
+
+// Chevron pointing left (dir = -1) or right (dir = +1) with its tip at (tip_x, cy).
+void draw_chevron(int tip_x, int cy, int dir, uint16_t color) {
+  int arm_x = tip_x - dir * CHEV_DX;
+  int in_tip = tip_x - dir * CHEV_T;
+  int in_arm = arm_x - dir * CHEV_T;
+  gfx->fillTriangle(tip_x, cy, arm_x, cy - CHEV_DY, in_arm, cy - CHEV_DY, color);
+  gfx->fillTriangle(tip_x, cy, in_arm, cy - CHEV_DY, in_tip, cy, color);
+  gfx->fillTriangle(tip_x, cy, arm_x, cy + CHEV_DY, in_arm, cy + CHEV_DY, color);
+  gfx->fillTriangle(tip_x, cy, in_arm, cy + CHEV_DY, in_tip, cy, color);
+}
+
+// Number of chevrons lit at this point of the blink cycle (outermost lights last).
+int lit_chevrons(unsigned long now) {
+  unsigned long t = (now - blink_start) % BLINK_PERIOD_MS;
+  if (t >= BLINK_ON_MS) return 0;
+  return min(CHEVRONS, (int)(t / BLINK_STEP_MS) + 1);
+}
+
+// Chevron 0 sits next to the gauges and lights first; the rest step out towards the edge.
+void draw_indicator(int dir, int lit) {
+  int cy = SCREEN_H / 2;
+  int inner_tip = dir < 0 ? IND_W - 6 - CHEV_DX - CHEV_T : SCREEN_W - IND_W + 6 + CHEV_DX + CHEV_T;
+  for (int i = 0; i < CHEVRONS; i++) {
+    int tip_x = inner_tip + dir * i * CHEV_SPACING;
+    draw_chevron(tip_x, cy, dir, i < lit ? COLOR_AMBER : COLOR_AMBER_DIM);
+  }
+}
 
 // Horizontal bar centred at zero: fills right for positive values, left for negative.
 void draw_bar(int y, int value, uint16_t color) {
-  int mid = BAR_X + BAR_W / 2;
-  int len = value * (BAR_W / 2) / CTRL_MAX;
-  gfx->fillRect(BAR_X, y, BAR_W, BAR_H, RGB565_BLACK);
-  gfx->drawRect(BAR_X, y, BAR_W, BAR_H, RGB565_DARKGREY);
-  if (len > 0) gfx->fillRect(mid, y + 2, len, BAR_H - 4, color);
-  if (len < 0) gfx->fillRect(mid + len, y + 2, -len, BAR_H - 4, color);
-  gfx->drawFastVLine(mid, y, BAR_H, RGB565_WHITE);
+  int mid = GAUGE_X + GAUGE_W / 2;
+  int len = value * (GAUGE_W / 2 - 2) / CTRL_MAX;
+  gfx->fillRoundRect(GAUGE_X, y, GAUGE_W, BAR_H, 4, COLOR_BG);
+  gfx->drawRoundRect(GAUGE_X, y, GAUGE_W, BAR_H, 4, COLOR_FRAME);
+  if (len > 0) gfx->fillRect(mid, y + 3, len, BAR_H - 6, color);
+  if (len < 0) gfx->fillRect(mid + len, y + 3, -len, BAR_H - 6, color);
+  gfx->drawFastVLine(mid, y + 1, BAR_H - 2, RGB565_WHITE);
 }
 
-void draw_value(int y, const char *label, int value) {
-  char buf[16];
-  snprintf(buf, sizeof(buf), "%-5s%4d", label, value);
+void draw_gauge(int y, const char *label, int value, uint16_t color) {
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%4d", value);
+  gfx->setTextSize(1);
+  gfx->setTextColor(COLOR_LABEL, COLOR_PANEL);
+  gfx->setCursor(GAUGE_X, y + 6);
+  gfx->print(label);
   gfx->setTextSize(2);
-  gfx->setTextColor(RGB565_WHITE, RGB565_BLACK);
-  gfx->setCursor(4, y + 4);
+  gfx->setTextColor(RGB565_WHITE, COLOR_PANEL);
+  gfx->setCursor(GAUGE_X + GAUGE_W - 48, y);
   gfx->print(buf);
+  draw_bar(y + 20, value, color);
+}
+
+// White badge at the top of the panel, lit while reversing (like a reversing light).
+void draw_reverse(bool on) {
+  int x = GAUGE_X, y = 8, w = GAUGE_W, h = 24;
+  gfx->fillRoundRect(x, y, w, h, 6, on ? RGB565_WHITE : COLOR_PANEL);
+  gfx->drawRoundRect(x, y, w, h, 6, on ? RGB565_WHITE : COLOR_REVERSE_DIM);
+  gfx->setTextSize(2);
+  gfx->setTextColor(on ? RGB565_BLACK : COLOR_REVERSE_DIM);
+  gfx->setCursor(x + (w - 7 * 12) / 2, y + 5);
+  gfx->print("REVERSE");
+}
+
+void draw_link(bool ok) {
+  int y = SCREEN_H - 22;
+  gfx->fillRect(CENTER_X + 4, y - 2, CENTER_W - 8, 18, COLOR_PANEL);
+  gfx->fillCircle(GAUGE_X + 6, y + 7, 5, ok ? COLOR_FWD : RGB565_RED);
+  gfx->setTextSize(2);
+  gfx->setTextColor(ok ? COLOR_FWD : RGB565_RED, COLOR_PANEL);
+  gfx->setCursor(GAUGE_X + 18, y);
+  gfx->print(ok ? "LINK" : "NO LINK");
 }
 
 void draw_static() {
-  gfx->fillScreen(RGB565_BLACK);
-  gfx->setTextSize(3);
-  gfx->setTextColor(RGB565_GREEN);
-  gfx->setCursor(4, 4);
-  gfx->print("OpenBot S3");
+  gfx->fillScreen(COLOR_BG);
+  gfx->fillRoundRect(CENTER_X, 2, CENTER_W, SCREEN_H - 4, 10, COLOR_PANEL);
+  gfx->drawRoundRect(CENTER_X, 2, CENTER_W, SCREEN_H - 4, 10, COLOR_FRAME);
+  draw_indicator(-1, 0);
+  draw_indicator(1, 0);
 }
 
 void update_display() {
   static int last_steering = INT_MIN, last_throttle = INT_MIN;
-  static int last_ind_left = -1, last_ind_right = -1;
+  static int last_lit_left = -1, last_lit_right = -1;
   static int last_link = -1;
+  static int last_reverse = -1;
+  static bool was_blinking = false;
 
-  if (link_ok != last_link) {
-    gfx->setTextSize(2);
-    gfx->setCursor(210, 8);
-    gfx->setTextColor(link_ok ? RGB565_GREEN : RGB565_RED, RGB565_BLACK);
-    gfx->print(link_ok ? "  LINK" : "NO HB ");
-    last_link = link_ok;
+  unsigned long now = millis();
+  bool blinking = indicator_left || indicator_right;
+  if (blinking && !was_blinking) blink_start = now;  // start each blink with the first chevron lit
+  was_blinking = blinking;
+
+  int lit = blinking ? lit_chevrons(now) : 0;
+  int lit_left = indicator_left ? lit : 0;
+  int lit_right = indicator_right ? lit : 0;
+  if (lit_left != last_lit_left) {
+    draw_indicator(-1, lit_left);
+    last_lit_left = lit_left;
   }
+  if (lit_right != last_lit_right) {
+    draw_indicator(1, lit_right);
+    last_lit_right = lit_right;
+  }
+
   if (ctrl_steering != last_steering) {
-    draw_value(50, "STR", ctrl_steering);
-    draw_bar(50, ctrl_steering, RGB565_CYAN);
+    draw_gauge(40, "STEER", ctrl_steering, COLOR_STEER);
     last_steering = ctrl_steering;
   }
   if (ctrl_throttle != last_throttle) {
-    draw_value(90, "THR", ctrl_throttle);
-    draw_bar(90, ctrl_throttle, ctrl_throttle >= 0 ? RGB565_GREEN : RGB565_ORANGE);
+    draw_gauge(90, "THROTTLE", ctrl_throttle, ctrl_throttle >= 0 ? COLOR_FWD : COLOR_REV);
     last_throttle = ctrl_throttle;
   }
-  if (indicator_left != last_ind_left || indicator_right != last_ind_right) {
-    gfx->setTextSize(3);
-    gfx->setCursor(4, 135);
-    gfx->setTextColor(indicator_left ? RGB565_YELLOW : RGB565_DARKGREY, RGB565_BLACK);
-    gfx->print("<");
-    gfx->setCursor(296, 135);
-    gfx->setTextColor(indicator_right ? RGB565_YELLOW : RGB565_DARKGREY, RGB565_BLACK);
-    gfx->print(">");
-    last_ind_left = indicator_left;
-    last_ind_right = indicator_right;
+  if (indicator_reverse != last_reverse) {
+    draw_reverse(indicator_reverse);
+    last_reverse = indicator_reverse;
+  }
+  if (link_ok != last_link) {
+    draw_link(link_ok);
+    last_link = link_ok;
   }
 }
 
@@ -291,13 +388,16 @@ void loop() {
   if (!link_ok) {
     ctrl_steering = 0;
     ctrl_throttle = 0;
+    indicator_left = 0;  // don't keep signalling a turn the phone no longer controls
+    indicator_right = 0;
+    indicator_reverse = 0;
   }
 
   write_steering(ctrl_steering);
   write_throttle(ctrl_throttle);
 
   static unsigned long display_time = 0;
-  if (millis() - display_time >= 50) {  // 20 fps is plenty
+  if (millis() - display_time >= 20) {  // fast enough for smooth chevron steps
     update_display();
     display_time = millis();
   }
