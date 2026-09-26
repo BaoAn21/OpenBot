@@ -213,16 +213,13 @@ public abstract class ControlsFragment extends Fragment implements ServerListene
         == Enums.ControlMode.GAMEPAD) {
       switch (keyCode.getKeyCode()) {
         case KeyEvent.KEYCODE_BUTTON_X: // square
-          toggleIndicatorEvent(Enums.VehicleIndicator.LEFT.getValue());
-          processControllerKeyData(Constants.CMD_INDICATOR_LEFT);
+          toggleIndicatorButton(Enums.VehicleIndicator.LEFT, Constants.CMD_INDICATOR_LEFT);
           break;
         case KeyEvent.KEYCODE_BUTTON_Y: // triangle
-          toggleIndicatorEvent(Enums.VehicleIndicator.STOP.getValue());
-          processControllerKeyData(Constants.CMD_INDICATOR_STOP);
+          toggleIndicatorButton(Enums.VehicleIndicator.REVERSE, Constants.CMD_INDICATOR_REVERSE);
           break;
         case KeyEvent.KEYCODE_BUTTON_B: // circle
-          toggleIndicatorEvent(Enums.VehicleIndicator.RIGHT.getValue());
-          processControllerKeyData(Constants.CMD_INDICATOR_RIGHT);
+          toggleIndicatorButton(Enums.VehicleIndicator.RIGHT, Constants.CMD_INDICATOR_RIGHT);
           break;
         case KeyEvent.KEYCODE_BUTTON_A: // x
           processControllerKeyData(Constants.CMD_LOGS);
@@ -410,6 +407,17 @@ public abstract class ControlsFragment extends Fragment implements ServerListene
     BotToControllerEventBus.emitEvent(
         ConnectionUtils.createStatus("NOISE", vehicle.isNoiseEnabled()));
     audioPlayer.playNoise(voice, vehicle.isNoiseEnabled());
+  }
+
+  /** Gamepad buttons work like a car's stalk: press once to switch on, again to switch off. */
+  private void toggleIndicatorButton(Enums.VehicleIndicator indicator, String command) {
+    if (vehicle.getIndicator() == indicator.getValue()) {
+      toggleIndicatorEvent(Enums.VehicleIndicator.STOP.getValue());
+      processControllerKeyData(Constants.CMD_INDICATOR_STOP);
+    } else {
+      toggleIndicatorEvent(indicator.getValue());
+      processControllerKeyData(command);
+    }
   }
 
   private void toggleIndicatorEvent(int value) {
