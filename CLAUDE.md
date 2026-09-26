@@ -7,7 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 OpenBot turns smartphones into robot brains. This is a monorepo spanning hardware, firmware, and several independent software stacks that communicate over a serial link (phone <-> MCU) or WiFi (phone <-> controller/policy tooling). There is no single build for "the project" — always work inside the relevant subdirectory, each of which has its own toolchain:
 
 - `android/` — Kotlin/Java Android apps (Gradle). Contains two apps built from one project: the **robot** app (`android/robot`) that runs on the phone mounted on the vehicle, and the **controller** app (`android/controller`) for driving it. Shared code lives in `android/comlib`.
-- `firmware/openbot/` — Arduino/ESP32 C++ firmware (`openbot.ino`) that bridges the phone and the robot body's motors/sensors over serial.
+- `firmware/openbot/` — Arduino/ESP32 C++ firmware (`openbot.ino`) that bridges the phone and the robot body's motors/sensors over serial. Upstream multi-board sketch; still speaks the old left/right protocol.
+- `firmware/openbot_esp32s3/` — our own firmware for the LilyGO T-Display-S3 (steering servo + H-bridge, screen as turn signals/reverse light). This is the one that matches the current robot app. Pinout and protocol in its `README.md`.
 - `policy/` — Python/TensorFlow driving-policy training (imitation learning) plus a `frontend/` (React) and `openbot/server/` for visualizing training in-browser.
 - `python/` — embedded-Linux alternative to the phone: runs the driving policy or joystick control directly from a Linux computer with a camera.
 - `controller/` — four independent remote-control clients for the robot: `node-js/` (browser, Vite + Express), `web-server/` (cloud/WebRTC variant of the node-js controller), `python/` (keyboard/joystick over the terminal), `flutter/` (mobile controller app for Android/iOS).
@@ -32,9 +33,27 @@ cd android
 ./gradlew applyStyle             # auto-fix Java formatting
 ```
 
+The default `java` on this machine is JDK 27, which Gradle 7.6 can't run on ("Unsupported class file major version 71"). Prefix gradle calls with JDK 17:
+
+```bash
+export JAVA_HOME=~/.local/share/mise/installs/java/temurin-17; export PATH=$JAVA_HOME/bin:$PATH
+```
+
 Compile SDK 33 / target SDK 32, min API 21. Version compatibility issues between Android Studio and AGP are common — see `android/README.md` troubleshooting section if Gradle sync fails.
 
-### Firmware (`firmware/openbot/`)
+### Firmware for T-Display-S3 (`firmware/openbot_esp32s3/`)
+
+The active firmware for this robot. Built and flashed with `arduino-cli` (ESP32 core 3.3.x + "GFX Library for Arduino"); the board shows up as `/dev/ttyACM0` and the user is in `uucp`, so flashing works from here:
+
+```bash
+arduino-cli compile --upload -p /dev/ttyACM0 \
+  --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,USBMode=hwcdc,FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB" \
+  firmware/openbot_esp32s3
+```
+
+`CDCOnBoot=cdc` is required or `Serial` won't reach the USB-C port. To exercise it without the phone, write the protocol messages (`h500`, `c<steering>,<throttle>`, `i...`, `f`) to `/dev/ttyACM0` at 115200 from a short Python script; the screen shows the result, but the user has to look at it. Pins, settings and protocol are documented in `firmware/openbot_esp32s3/README.md` — keep that README in sync when changing pins or messages. Motor driver: only `HBRIDGE` is implemented; `ESC` (brushed motor) is planned next.
+
+### Firmware, upstream (`firmware/openbot/`)
 
 Edited/flashed via the Arduino IDE, not a CLI build. Before compiling, set the hardware config macro at the top of `openbot.ino` (e.g. `OPENBOT DIY`, `OPENBOT PCB_V2`, `OPENBOT RTR_TT`, `OPENBOT RC_CAR`, `OPENBOT LITE`, `OPENBOT RTR_520`, `OPENBOT MTV`, `DIY_ESP32`) and the relevant feature flags (`HAS_VOLTAGE_DIVIDER`, `HAS_INDICATORS`, `HAS_SPEED_SENSORS_FRONT/BACK`, `HAS_SONAR`, `HAS_BUMPER`, `HAS_OLED`, `HAS_LEDS_*`, `BLUETOOTH`) — disabled features are compiled out to save flash/RAM.
 
@@ -145,6 +164,10 @@ overlay that works in portrait lands behind it.
 
 **Localization convention.** Every README, CONTRIBUTING, and DISCLAIMER file exists in multiple language variants (`.de-DE.md`, `.es-ES.md`, `.fr-FR.md`, `.ko-KR.md`, `.zh-CN.md`) alongside the English original. When updating docs, the English file is the source of truth; translations are maintained separately and are not expected to be updated in the same change.
 
-**Driving control is Ackermann-style (steering + throttle), not differential (left/right).** `android/robot/src/main/java/org/openbot/vehicle/Control.java` and `Vehicle.java` represent commands as a `steering`/`throttle` pair in raw device units `[-255, 255]` (`Control.MAX`), not as independent left/right wheel speeds. `Control.fromLeftRight(left, right)` is the conversion point for callers that still produce a normalized differential-drive pair (TFLite models, the object tracker, phone/web controllers) — it maps `(left, right)` in `[-1, 1]` to `(steering, throttle)`. `Vehicle.getLeftSpeed()/getRightSpeed()` no longer exist; use `getSteering()`/`getThrottle()`. The serial protocol to the firmware changed accordingly: `sendControl()` now sends `c<steering>,<throttle>\n` instead of `c<left>,<right>\n`, so this must stay in sync with `firmware/openbot/openbot.ino`'s parsing and with `python/` if it speaks the same protocol.
+**Driving control is Ackermann-style (steering + throttle), not differential (left/right).** `android/robot/src/main/java/org/openbot/vehicle/Control.java` and `Vehicle.java` represent commands as a `steering`/`throttle` pair in raw device units `[-255, 255]` (`Control.MAX`), not as independent left/right wheel speeds. `Control.fromLeftRight(left, right)` is the conversion point for callers that still produce a normalized differential-drive pair (TFLite models, the object tracker, phone/web controllers) — it maps `(left, right)` in `[-1, 1]` to `(steering, throttle)`. `Vehicle.getLeftSpeed()/getRightSpeed()` no longer exist; use `getSteering()`/`getThrottle()`. The serial protocol to the firmware changed accordingly: `sendControl()` now sends `c<steering>,<throttle>\n` instead of `c<left>,<right>\n`. `firmware/openbot_esp32s3/` parses this format; `firmware/openbot/openbot.ino` still parses `c<left>,<right>` and would misread it. Keep `python/` in sync too if it speaks the same protocol.
+
+**Indicator values: -1 left, 0 off, 1 right, 2 reverse.** (`Enums.VehicleIndicator`; an earlier test build used 1 = reverse — that is gone.) `Vehicle.setIndicator()` sends them as `i1,0`, `i0,0`, `i0,1` and `i0,0,1`; the third field of `i<left>,<right>[,<reverse>]` is optional, so two-field messages still work. The indicator value is also the model's `cmd` input (`tflite/Autopilot*.java`) and is logged to `indicatorLog.txt` as the training `cmd`, so reverse shows up as `cmd 2`. Before training on such data, check `policy/openbot/data_augmentation.py`: `flip_sample` negates `cmd` and `augment_cmd` randomly turns 0 into ±1, which is wrong for a reverse value. On the gamepad the indicators toggle like a car stalk (`ControlsFragment.toggleIndicatorButton`): square = left, circle = right, triangle = reverse; pressing the active one again turns it off. The phone/web controller apps still use their left/right/stop commands.
+
+**Pending:** Espressif's USB vendor ID (`12346`) is not in `android/robot/src/main/res/xml/device_filter.xml` yet, so the app doesn't auto-launch when the T-Display-S3 is plugged in.
 
 When chaging code, remember to show me first.
