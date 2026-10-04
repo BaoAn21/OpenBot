@@ -15,6 +15,7 @@ from . import (
     dataloader,
     dataset_dir,
     data_augmentation,
+    eval_preview,
     losses,
     metrics,
     models,
@@ -657,6 +658,16 @@ def do_evaluation(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0
     )
     utils.savefig(os.path.join(tr.log_path, "test_preview.png"))
     utils.compare_tf_tflite(last_model, last_tflite, policy=tr.hyperparameters.POLICY)
+
+    if tr.hyperparameters.POLICY == "autopilot":
+        callback.broadcast("message", "Generate evaluation preview...")
+        best_val_model = utils.load_model(
+            os.path.join(tr.checkpoint_path, best_val_checkpoint),
+            tr.loss_fn,
+            tr.metric_list,
+            tr.custom_objects,
+        )
+        eval_preview.run(best_val_model, tr.test_ds.unbatch(), tr.log_path)
 
 
 def tfrecords_path(params: Hyperparameters):
