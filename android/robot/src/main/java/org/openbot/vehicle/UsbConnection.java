@@ -52,14 +52,12 @@ public class UsbConnection {
     this.baudRate = baudRate;
     localBroadcastManager = LocalBroadcastManager.getInstance(this.context);
     usbManager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-      usbPermissionIntent =
-          PendingIntent.getBroadcast(
-              this.context, 0, new Intent(ACTION_USB_PERMISSION), PendingIntent.FLAG_IMMUTABLE);
-    } else {
-      usbPermissionIntent =
-          PendingIntent.getBroadcast(this.context, 0, new Intent(ACTION_USB_PERMISSION), 0);
-    }
+    // Must be mutable on Android 12+, otherwise the system can't add EXTRA_DEVICE and
+    // EXTRA_PERMISSION_GRANTED to the reply and granting permission looks like a denial.
+    Intent permissionIntent =
+        new Intent(ACTION_USB_PERMISSION).setPackage(this.context.getPackageName());
+    int flags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? PendingIntent.FLAG_MUTABLE : 0;
+    usbPermissionIntent = PendingIntent.getBroadcast(this.context, 0, permissionIntent, flags);
   }
 
   private final UsbSerialInterface.UsbReadCallback callback =
