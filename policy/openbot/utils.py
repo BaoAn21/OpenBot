@@ -57,13 +57,14 @@ def show_batch(dataset, policy="autopilot", model=None, fig_num=1):
     NUM_SAMPLES = min(image_batch.numpy().shape[0], 15)
 
     if policy == "autopilot":
-        command_input_name = "Cmd"
+        # A memory model (donkey_memory) takes its previous controls in the cmd slot.
+        command_input_name = "Cmd" if cmd_batch.shape.rank == 1 else "Mem"
         size = (15, 10)
         if model is not None:
             pred_batch = model.predict(
                 (
                     tf.slice(image_batch, [0, 0, 0, 0], [NUM_SAMPLES, -1, -1, -1]),
-                    tf.slice(cmd_batch, [0], [NUM_SAMPLES]),
+                    cmd_batch[:NUM_SAMPLES],
                 )
             )
     elif policy == "point_goal_nav":
@@ -91,7 +92,7 @@ def show_batch(dataset, policy="autopilot", model=None, fig_num=1):
                 "%s: %s, Label: [%.2f %.2f]"
                 % (
                     command_input_name,
-                    cmd_batch.numpy()[n],
+                    np.round(cmd_batch.numpy()[n], 2),
                     float(label_batch[n][0]),
                     float(label_batch[n][1]),
                 )
@@ -101,7 +102,7 @@ def show_batch(dataset, policy="autopilot", model=None, fig_num=1):
                 "%s: %s, Label: [%.2f %.2f], Pred: [%.2f %.2f]"
                 % (
                     command_input_name,
-                    cmd_batch.numpy()[n],
+                    np.round(cmd_batch.numpy()[n], 2),
                     float(label_batch[n][0]),
                     float(label_batch[n][1]),
                     float(pred_batch[n][0]),
@@ -156,7 +157,11 @@ def compare_tf_tflite(
         print("output_details:", output_details)
 
     if policy == "autopilot":
-        command_input_name = "cmd_input"
+        # A memory model (donkey_memory) has mem_input where the others have cmd_input.
+        if any("mem_input" in d["name"] for d in input_details):
+            command_input_name = "mem_input"
+        else:
+            command_input_name = "cmd_input"
     elif policy == "point_goal_nav":
         command_input_name = "goal_input"
     else:
