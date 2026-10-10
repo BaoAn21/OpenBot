@@ -82,7 +82,7 @@ python -m openbot.train --create_tf_record --model pilot_net \
     --batch_size 128 --num_epochs 100 --batch_norm
 ```
 
-`Dockerfile`, `docker-run-train.sh`, `openbot-train.tar.gz` and
+`Dockerfile`, `docker-run-train.sh` and
 `TRAINING_ON_PC.md` are leftovers from an earlier setup where training had to be
 shipped from a laptop without a GPU. Don't suggest them. Those runs also left
 root-owned files behind in `policy/dataset` and `policy/models` (the container
