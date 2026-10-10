@@ -90,6 +90,19 @@ ran as root through a bind mount); a `PermissionError` while writing
 `matched_frame_ctrl.txt` or `train_preview.png` means another one surfaced, and
 the fix is `sudo chown -R sim:sim policy/dataset policy/models`.
 
+**Autopilot loss keeps the official OpenBot idea.** Labels here are
+`(steering, throttle)` / 255, not upstream's `(left, right)`, but
+`losses.sq_weighted_mse_angle` is a deliberate port of the upstream loss:
+`w^2 * (dt^2 + 5 * ds^2)` with `w = 2|steering| + 0.05` (upstream's
+`angle = right - left = -2 * steering`). The weight depends on turn sharpness
+only, so rare turns aren't drowned out by straight driving, and steering errors
+cost 5x throttle errors. Upstream's quirks (asymmetric `|angle + 0.05|`, and the
+angle MSE collapsing to a batch mean on a 1-D tensor) are intentionally fixed.
+Don't fold throttle into the weight (the old `command_weight`): that was a
+workaround for straight reverse driving, which the user has dropped from the
+model's scope. Loss values from before this change aren't comparable to runs
+after it; compare models by the metrics.
+
 `policy/frontend` is a separate CRA app (own `package.json`): `npm start`, `npm run build`, `npm test` inside `policy/frontend`.
 
 ### Embedded-Linux control (`python/`)

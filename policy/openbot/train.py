@@ -15,11 +15,13 @@ from . import (
     dataloader,
     dataset_dir,
     data_augmentation,
+    eval_preview,
     losses,
     metrics,
     models,
     models_dir,
     tfrecord,
+    tfrecord_mem,
     tfrecord_seq,
     tfrecord_utils,
     utils,
@@ -67,6 +69,9 @@ class Hyperparameters:
     TRIM_STATIONARY: bool = False
     KEEP_STATIONARY: int = tfrecord_seq.DEFAULT_KEEP_STATIONARY
 
+    # Previous controls fed back to a memory model (donkey_memory); 0 means none.
+    MEM_LEN: int = 0
+
     USE_LAST: bool = False
 
     WANDB: bool = False
@@ -109,6 +114,8 @@ class Hyperparameters:
             model_name += "_seq" + tfrecord_seq.offsets_tag(self.seq_offsets)
             if self.TRIM_STATIONARY:
                 model_name += f"_trim{self.KEEP_STATIONARY}"
+        if self.MEM_LEN:
+            model_name += f"_mem{self.MEM_LEN}"
 
         return model_name
 
@@ -221,7 +228,10 @@ def process_data(tr: Training):
 
 def load_tfrecord(tr: Training, verbose=0):
     seq_len = tr.hyperparameters.SEQ_LEN
-    if seq_len > 1:
+    mem_len = tr.hyperparameters.MEM_LEN
+    if mem_len:
+        autopilot_parse_fn = tfrecord_mem.make_parse_fn(mem_len)
+    elif seq_len > 1:
         autopilot_parse_fn = tfrecord_seq.make_parse_fn(seq_len)
     else:
         autopilot_parse_fn = tfrecord_utils.parse_tfrecord_fn_autopilot
@@ -229,6 +239,11 @@ def load_tfrecord(tr: Training, verbose=0):
     def process_train_sample(features):
         # image = tf.image.resize(features["image"], size=(224, 224))
         image = features["image"]
+
+        if mem_len:
+            # donkeycar's memory model: the previous controls take the place of the
+            # cmd input, and its default config applies no augmentation at all.
+            return (image, features["mem"]), [features["left"], features["right"]]
 
         if tr.hyperparameters.POLICY == "autopilot":
             cmd_input = features["cmd"]
@@ -261,7 +276,9 @@ def load_tfrecord(tr: Training, verbose=0):
     def process_test_sample(features):
         image = features["image"]
 
-        if tr.hyperparameters.POLICY == "autopilot":
+        if mem_len:
+            cmd_input = features["mem"]
+        elif tr.hyperparameters.POLICY == "autopilot":
             cmd_input = features["cmd"]
 
         elif tr.hyperparameters.POLICY == "point_goal_nav":
@@ -464,10 +481,12 @@ def do_training(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0):
     if not resume_training:
         build_model = getattr(models, tr.hyperparameters.MODEL)
         model_kwargs = {}
-        # Only the sequence architectures take seq_len; the single-frame ones keep
-        # their original four-argument signature.
+        # Only the sequence and memory architectures take seq_len / mem_len; the
+        # single-frame ones keep their original four-argument signature.
         if "seq_len" in inspect.signature(build_model).parameters:
             model_kwargs["seq_len"] = tr.hyperparameters.SEQ_LEN
+        if "mem_len" in inspect.signature(build_model).parameters:
+            model_kwargs["mem_len"] = tr.hyperparameters.MEM_LEN
         model = build_model(
             tr.NETWORK_IMG_WIDTH,
             tr.NETWORK_IMG_HEIGHT,
@@ -483,7 +502,10 @@ def do_training(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0):
 
     callback.broadcast("model", tr.model_name)
 
-    if tr.hyperparameters.POLICY == "autopilot":
+    if tr.hyperparameters.MEM_LEN:
+        # donkeycar trains its memory model on plain mse, not the turn-weighted loss.
+        tr.loss_fn = losses.mse_raw
+    elif tr.hyperparameters.POLICY == "autopilot":
         tr.loss_fn = losses.sq_weighted_mse_angle
     elif tr.hyperparameters.POLICY == "point_goal_nav":
         tr.loss_fn = losses.mae_raw_weighted_mse_angle
@@ -658,14 +680,31 @@ def do_evaluation(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0
     utils.savefig(os.path.join(tr.log_path, "test_preview.png"))
     utils.compare_tf_tflite(last_model, last_tflite, policy=tr.hyperparameters.POLICY)
 
+    if tr.hyperparameters.POLICY == "autopilot":
+        callback.broadcast("message", "Generate evaluation preview...")
+        best_val_model = utils.load_model(
+            os.path.join(tr.checkpoint_path, best_val_checkpoint),
+            tr.loss_fn,
+            tr.metric_list,
+            tr.custom_objects,
+        )
+        eval_preview.run(
+            best_val_model,
+            tr.test_ds.unbatch(),
+            tr.log_path,
+            tfrec_path=tr.test_data_dir if tr.hyperparameters.MEM_LEN else None,
+        )
+
 
 def tfrecords_path(params: Hyperparameters):
     """Where the tfrecords for this configuration live.
 
-    Multi-frame records go in their own directory named after the window shape, so
-    changing seq_len or seq_stride can never silently reuse records built for a
-    different one.
+    Multi-frame and memory records go in their own directory named after the window
+    shape, so changing seq_len, seq_stride or mem_len can never silently reuse records
+    built for a different one.
     """
+    if params.MEM_LEN:
+        return os.path.join(dataset_dir, tfrecord_mem.tfrecords_dir_name(params.MEM_LEN))
     if params.SEQ_LEN > 1:
         return os.path.join(
             dataset_dir,
@@ -693,7 +732,9 @@ def start_train(
         tr.train_data_dir = os.path.join(records_dir, "train.tfrec")
         tr.test_data_dir = os.path.join(records_dir, "test.tfrec")
         if not os.path.isfile(tr.train_data_dir):
-            if params.SEQ_LEN > 1:
+            if params.MEM_LEN:
+                hint = f"python -m openbot.tfrecord_mem --mem_len {params.MEM_LEN}"
+            elif params.SEQ_LEN > 1:
                 hint = f"python -m openbot.tfrecord_seq --seq_offsets {params.SEQ_OFFSETS}"
                 if params.TRIM_STATIONARY:
                     hint += (
@@ -719,6 +760,14 @@ def create_tfrecord(callback: MyCallback, policy="autopilot", params=None):
     callback.broadcast(
         "message", "Converting data to tfrecord (this may take some time)..."
     )
+
+    if params is not None and params.MEM_LEN:
+        out_dir = tfrecords_path(params)
+        for split, name in (("train_data", "train.tfrec"), ("test_data", "test.tfrec")):
+            tfrecord_mem.convert_dataset(
+                os.path.join(dataset_dir, split), out_dir, name, params.MEM_LEN
+            )
+        return
 
     if params is not None and params.SEQ_LEN > 1:
         out_dir = tfrecords_path(params)
@@ -767,6 +816,7 @@ if __name__ == "__main__":
             "cil",
             "pilot_net",
             "pilot_net_seq",
+            "donkey_memory",
         ],
         help="network architecture (default: pilot_net)",
     )
@@ -803,6 +853,13 @@ if __name__ == "__main__":
         default=tfrecord_seq.DEFAULT_KEEP_STATIONARY,
         help="frames to keep from an interior stationary run when trimming "
         f"(default: {tfrecord_seq.DEFAULT_KEEP_STATIONARY})",
+    )
+    parser.add_argument(
+        "--mem_len",
+        type=int,
+        default=None,
+        help="memory policy (--model donkey_memory): number of previous controls "
+        f"fed back to the model (default: {tfrecord_mem.DEFAULT_MEM_LEN})",
     )
     parser.add_argument(
         "--batch_size",
@@ -880,6 +937,23 @@ if __name__ == "__main__":
         )
     if params.SEQ_LEN == 1 and is_seq_model:
         parser.error(f"--model {params.MODEL} needs --seq_offsets (or --seq_len)")
+
+    is_mem_model = (
+        "mem_len" in inspect.signature(getattr(models, params.MODEL)).parameters
+    )
+    if args.mem_len is not None and not is_mem_model:
+        parser.error(f"--mem_len needs --model donkey_memory, not {params.MODEL}")
+    if is_mem_model:
+        if params.SEQ_LEN > 1 or args.trim_stationary:
+            parser.error(f"--model {params.MODEL} takes no stacked-frame options")
+        if args.flip_aug or args.cmd_aug or args.policy != "autopilot":
+            parser.error(
+                f"--model {params.MODEL} is donkeycar's memory model as is: autopilot "
+                "only, no --flip_aug or --cmd_aug"
+            )
+        params.MEM_LEN = args.mem_len or tfrecord_mem.DEFAULT_MEM_LEN
+        # The architecture has no batch norm; keep the model name honest about it.
+        params.BATCH_NORM = False
 
     def broadcast(event, payload=None):
         print()

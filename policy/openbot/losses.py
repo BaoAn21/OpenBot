@@ -55,10 +55,19 @@ def weighted_mse_angle(y_gt, y_pred):
 
 
 def sq_weighted_mse_angle(y_true, y_pred):
-    weight = command_weight(y_true)
-    return tf.math.square(weight) * (
-        tf.keras.losses.mean_squared_error(y_true, y_pred) + mse_angle(y_true, y_pred)
-    )
+    # The official OpenBot loss, ported to (steering, throttle). Upstream works on
+    # (left, right) with angle = right - left; since left = t + s and right = t - s
+    # (Control.fromLeftRight), that angle is -2 * steering and its
+    # w^2 * (MSE + angle error^2) reduces to w^2 * (dt^2 + 5 * ds^2): steering
+    # errors cost 5x throttle errors, and samples are weighted by turn sharpness
+    # only, so the rare turns are not drowned out by straight driving.
+    # Two upstream quirks are dropped: its weight |angle + 0.05| is made symmetric
+    # (|angle| + 0.05), and the angle error is per sample instead of the batch mean
+    # that mean_squared_error returns for a 1-D tensor.
+    weight = 2.0 * tf.math.abs(angle(y_true)) + 0.05
+    steering_err = tf.math.square(angle(y_true) - angle(y_pred))
+    throttle_err = tf.math.square(throttle(y_true) - throttle(y_pred))
+    return tf.math.square(weight) * (throttle_err + 5.0 * steering_err)
 
 
 def weighted_mse_raw_angle(y_gt, y_pred):

@@ -280,3 +280,55 @@ def cil(img_width, img_height, bn=True, policy="autopilot"):
     model = tf.keras.Model(name="cil", inputs=(cnn.input, mlp.input), outputs=x)
 
     return model
+
+
+def donkey_memory(img_width, img_height, bn=False, policy="autopilot", mem_len=3):
+    """donkeycar's "memory" pilot (default_memory in donkeycar/parts/keras.py), as is.
+
+    The current image plus the last mem_len (steering, throttle) pairs: recorded ones
+    in training, the model's own predictions when driving. Kept faithful on purpose,
+    so it is not pilot_net with a memory input bolted on: donkeycar's CNN with dropout
+    and no batch norm (bn is ignored), no cmd input, and tanh steering / sigmoid
+    throttle heads - which means it cannot predict reverse. The two heads are joined
+    into the single (steering, throttle) output every other model here has.
+    """
+    if policy != "autopilot":
+        raise Exception("donkey_memory only supports the autopilot policy")
+
+    drop = 0.2
+    drop2 = 0.1
+
+    img_in = tf.keras.Input(shape=(img_height, img_width, 3), name="img_input")
+    x = img_in
+    # core_cnn_layers: valid padding, dropout after every convolution.
+    for filters, kernel, stride in (
+        (24, 5, 2),
+        (32, 5, 2),
+        (64, 5, 2),
+        (64, 3, 1),
+        (64, 3, 1),
+    ):
+        x = tf.keras.layers.Conv2D(
+            filters, (kernel, kernel), strides=(stride, stride), activation="relu"
+        )(x)
+        x = tf.keras.layers.Dropout(drop)(x)
+    x = tf.keras.layers.Flatten()(x)
+
+    # The memory branch narrows from 2 * mem_len down to 2 (mem_depth = 0, the default).
+    mem_in = tf.keras.Input(shape=(2 * mem_len,), name="mem_input")
+    y = mem_in
+    for i in range(1, mem_len):
+        y = tf.keras.layers.Dense(2 * (mem_len - i), activation="relu")(y)
+        y = tf.keras.layers.Dropout(drop2)(y)
+
+    x = tf.keras.layers.concatenate([x, y])
+    x = tf.keras.layers.Dense(100, activation="relu")(x)
+    x = tf.keras.layers.Dropout(drop)(x)
+    x = tf.keras.layers.Dense(50, activation="relu")(x)
+    x = tf.keras.layers.Dropout(drop)(x)
+
+    steering = tf.keras.layers.Dense(1, activation="tanh", name="steering")(x)
+    throttle = tf.keras.layers.Dense(1, activation="sigmoid", name="throttle")(x)
+    x = tf.keras.layers.concatenate([steering, throttle])
+
+    return tf.keras.Model(name="donkey_memory", inputs=(img_in, mem_in), outputs=x)
