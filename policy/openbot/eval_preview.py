@@ -52,9 +52,14 @@ def mem_len_of(model):
     return 0 if mem is None else mem.shape[-1] // 2
 
 
-def load_test_dataset(tfrec_path, seq_len, mem_len=0):
-    """Unbatched ((image, cmd), label) pairs, matching train.process_test_sample.
-    For a memory model the memory takes the place of cmd."""
+def uses_cmd(model):
+    """Whether a memory model also takes the current-frame cmd (train.MEM_CMD)."""
+    return mem_len_of(model) > 0 and len(model.inputs) == 3
+
+
+def load_test_dataset(tfrec_path, seq_len, mem_len=0, use_cmd=False):
+    """Unbatched ((image, ...), label) pairs, matching train.process_test_sample.
+    For a memory model the memory takes the place of cmd, optionally alongside it."""
     if mem_len:
         parse_fn = tfrecord_mem.make_parse_fn(mem_len)
     elif seq_len > 1:
@@ -64,8 +69,13 @@ def load_test_dataset(tfrec_path, seq_len, mem_len=0):
 
     def to_sample(features):
         label = tf.stack([features["left"], features["right"]])
-        second = features["mem"] if mem_len else features["cmd"]
-        return (features["image"], second), label
+        if mem_len:
+            inputs = (features["image"], features["mem"])
+            if use_cmd:
+                inputs += (features["cmd"],)
+        else:
+            inputs = (features["image"], features["cmd"])
+        return inputs, label
 
     return tf.data.TFRecordDataset(tfrec_path).map(parse_fn).map(to_sample)
 
@@ -74,10 +84,12 @@ def predict_all(model, dataset, batch_size=64):
     """Run the model over the whole dataset. Returns (cmds, labels, preds); cmds holds
     the memory vectors instead for a memory model."""
     cmds, labels, preds = [], [], []
-    for (image, cmd), label in dataset.batch(batch_size):
-        second = cmd if cmd.shape.rank == 2 else tf.reshape(cmd, (-1, 1))
-        pred = model((image, second), training=False)
-        cmds.append(cmd.numpy())
+    for inputs, label in dataset.batch(batch_size):
+        model_inputs = tuple(
+            t if t.shape.rank != 1 else tf.reshape(t, (-1, 1)) for t in inputs
+        )
+        pred = model(model_inputs, training=False)
+        cmds.append(inputs[1].numpy())
         labels.append(label.numpy())
         preds.append(np.asarray(pred))
     return np.concatenate(cmds), np.concatenate(labels), np.concatenate(preds)
@@ -115,7 +127,7 @@ def plot_samples(dataset, indices, cmds, labels, preds, out_path):
     rows = int(np.ceil(len(indices) / cols))
     # Row height follows the image shape (OpenBot crops are a wide 256x96), plus room
     # for the three-line title.
-    (first_image, _), _ = next(iter(dataset.take(1)))
+    (first_image, *_), _ = next(iter(dataset.take(1)))
     height, width = first_image.shape[:2]
     fig, axes = plt.subplots(
         rows, cols, figsize=(4 * cols, (4 * height / width + 0.9) * rows), squeeze=False
@@ -123,7 +135,7 @@ def plot_samples(dataset, indices, cmds, labels, preds, out_path):
     for ax in axes.flat:
         ax.axis("off")
 
-    for ax, (i, ((image, _), _)) in zip(axes.flat, samples):
+    for ax, (i, ((image, *_), _)) in zip(axes.flat, samples):
         i = int(i)
         # Stacked-frame inputs: show the newest frame, the one the label belongs to.
         image = image.numpy()[..., -3:]
@@ -210,7 +222,7 @@ def plot_scatter(labels, preds, stats, out_path):
     plt.close(fig)
 
 
-def rollout(model, tfrec_path, mem_len, out_path):
+def rollout(model, tfrec_path, mem_len, out_path, use_cmd=False):
     """Replay each test session in order, feeding the model its own previous
     predictions as memory, the way donkeycar's KerasMemory.run drives: the memory
     starts at [0, 0] per pair (mem_start_speed 0) and each prediction is pushed in.
@@ -218,9 +230,17 @@ def rollout(model, tfrec_path, mem_len, out_path):
     The teacher-forced prediction (recorded memory, as in training) is computed on
     the same frames, so the gap between the two curves is what feeding back its own
     output costs. Returns the rollout and teacher-forced MAE over every session.
+
+    cmd (the current-frame indicator) is the same for both the teacher-forced and
+    rollout call - only memory is teacher-forced vs. fed back.
     """
     parse_fn = tfrecord_mem.make_parse_fn(mem_len)
-    step = tf.function(lambda image, mem: model((image, mem), training=False))
+    if use_cmd:
+        step = tf.function(
+            lambda image, mem, cmd: model((image, mem, cmd), training=False)
+        )
+    else:
+        step = tf.function(lambda image, mem: model((image, mem), training=False))
 
     sessions = collections.OrderedDict()
     for features in tf.data.TFRecordDataset(tfrec_path).map(parse_fn):
@@ -231,9 +251,13 @@ def rollout(model, tfrec_path, mem_len, out_path):
             memory = collections.deque([[0.0, 0.0]] * mem_len, maxlen=mem_len)
         own_mem = np.array(memory, dtype=np.float32).reshape(-1)
         # One call for both: the same image with the recorded and the fed-back memory.
-        pred = step(
-            tf.stack([features["image"]] * 2), tf.stack([features["mem"], own_mem])
-        ).numpy()
+        step_args = [
+            tf.stack([features["image"]] * 2),
+            tf.stack([features["mem"], own_mem]),
+        ]
+        if use_cmd:
+            step_args.append(tf.reshape(tf.stack([features["cmd"]] * 2), (-1, 1)))
+        pred = step(*step_args).numpy()
         trace = sessions[session]
         trace["true"].append([features["left"].numpy(), features["right"].numpy()])
         trace["teacher"].append(pred[0])
@@ -324,7 +348,13 @@ def run(model, dataset, out_dir, num_samples=20, seed=0, tfrec_path=None):
 
     mem_len = mem_len_of(model)
     if mem_len and tfrec_path:
-        mae = rollout(model, tfrec_path, mem_len, os.path.join(out_dir, "eval_rollout.png"))
+        mae = rollout(
+            model,
+            tfrec_path,
+            mem_len,
+            os.path.join(out_dir, "eval_rollout.png"),
+            use_cmd=uses_cmd(model),
+        )
         for k in ("teacher", "rollout"):
             print("%-8s MAE steering %.3f | throttle %.3f" % (k, mae[k][0], mae[k][1]))
         print("Saved eval_rollout.png to", out_dir)
@@ -372,15 +402,16 @@ def main():
     model = tf.keras.models.load_model(checkpoint, compile=False)
     seq_len = input_named(model, "img_input").shape[-1] // 3
     mem_len = mem_len_of(model)
+    use_cmd = uses_cmd(model)
     tfrec = args.tfrec or default_tfrec_path(args.model_dir)
     print(
-        f"Model: {checkpoint} (seq_len {seq_len}, mem_len {mem_len})\n"
+        f"Model: {checkpoint} (seq_len {seq_len}, mem_len {mem_len}, use_cmd {use_cmd})\n"
         f"Test data: {tfrec}"
     )
 
     run(
         model,
-        load_test_dataset(tfrec, seq_len, mem_len),
+        load_test_dataset(tfrec, seq_len, mem_len, use_cmd),
         os.path.join(args.model_dir, "logs"),
         args.num_samples,
         args.seed,

@@ -71,6 +71,8 @@ class Hyperparameters:
 
     # Previous controls fed back to a memory model (donkey_memory); 0 means none.
     MEM_LEN: int = 0
+    # Current-frame indicator fed into a memory model alongside the memory input.
+    MEM_CMD: bool = False
 
     USE_LAST: bool = False
 
@@ -116,6 +118,8 @@ class Hyperparameters:
                 model_name += f"_trim{self.KEEP_STATIONARY}"
         if self.MEM_LEN:
             model_name += f"_mem{self.MEM_LEN}"
+            if self.MEM_CMD:
+                model_name += "_cmd"
 
         return model_name
 
@@ -243,7 +247,10 @@ def load_tfrecord(tr: Training, verbose=0):
         if mem_len:
             # donkeycar's memory model: the previous controls take the place of the
             # cmd input, and its default config applies no augmentation at all.
-            return (image, features["mem"]), [features["left"], features["right"]]
+            label = [features["left"], features["right"]]
+            if tr.hyperparameters.MEM_CMD:
+                return (image, features["mem"], features["cmd"]), label
+            return (image, features["mem"]), label
 
         if tr.hyperparameters.POLICY == "autopilot":
             cmd_input = features["cmd"]
@@ -277,7 +284,10 @@ def load_tfrecord(tr: Training, verbose=0):
         image = features["image"]
 
         if mem_len:
-            cmd_input = features["mem"]
+            label = [features["left"], features["right"]]
+            if tr.hyperparameters.MEM_CMD:
+                return (image, features["mem"], features["cmd"]), label
+            return (image, features["mem"]), label
         elif tr.hyperparameters.POLICY == "autopilot":
             cmd_input = features["cmd"]
 
@@ -487,6 +497,8 @@ def do_training(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0):
             model_kwargs["seq_len"] = tr.hyperparameters.SEQ_LEN
         if "mem_len" in inspect.signature(build_model).parameters:
             model_kwargs["mem_len"] = tr.hyperparameters.MEM_LEN
+        if "use_cmd" in inspect.signature(build_model).parameters:
+            model_kwargs["use_cmd"] = tr.hyperparameters.MEM_CMD
         model = build_model(
             tr.NETWORK_IMG_WIDTH,
             tr.NETWORK_IMG_HEIGHT,
@@ -862,6 +874,12 @@ if __name__ == "__main__":
         f"fed back to the model (default: {tfrecord_mem.DEFAULT_MEM_LEN})",
     )
     parser.add_argument(
+        "--mem_cmd",
+        action="store_true",
+        help="memory policy (--model donkey_memory): also feed the current-frame "
+        "indicator (cmd) into the model",
+    )
+    parser.add_argument(
         "--batch_size",
         type=int,
         default=128,
@@ -943,6 +961,8 @@ if __name__ == "__main__":
     )
     if args.mem_len is not None and not is_mem_model:
         parser.error(f"--mem_len needs --model donkey_memory, not {params.MODEL}")
+    if args.mem_cmd and not is_mem_model:
+        parser.error(f"--mem_cmd needs --model donkey_memory, not {params.MODEL}")
     if is_mem_model:
         if params.SEQ_LEN > 1 or args.trim_stationary:
             parser.error(f"--model {params.MODEL} takes no stacked-frame options")
@@ -952,6 +972,7 @@ if __name__ == "__main__":
                 "only, no --flip_aug or --cmd_aug"
             )
         params.MEM_LEN = args.mem_len or tfrecord_mem.DEFAULT_MEM_LEN
+        params.MEM_CMD = args.mem_cmd
         # The architecture has no batch norm; keep the model name honest about it.
         params.BATCH_NORM = False
 
