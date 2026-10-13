@@ -28,6 +28,7 @@ public class Model {
   public enum CLASS {
     AUTOPILOT,
     AUTOPILOT_SEQ,
+    AUTOPILOT_MEM,
     MOBILENET,
     EFFICIENTDET,
     YOLOV4,
@@ -38,6 +39,7 @@ public class Model {
   public enum TYPE {
     CMDNAV,
     CMDNAV_SEQ,
+    CMDNAV_MEM,
     DETECTOR,
     GOALNAV,
   }
@@ -53,6 +55,8 @@ public class Model {
         return EnumSet.of(CLASS.AUTOPILOT);
       case CMDNAV_SEQ:
         return EnumSet.of(CLASS.AUTOPILOT_SEQ);
+      case CMDNAV_MEM:
+        return EnumSet.of(CLASS.AUTOPILOT_MEM);
       case GOALNAV:
         return EnumSet.of(CLASS.NAVIGATION);
       case DETECTOR:

@@ -35,6 +35,7 @@ public class FeatureList {
   public static final String AI = "AI";
   public static final String AUTOPILOT = "Autopilot";
   public static final String AUTOPILOT_SEQ = "Autopilot Seq";
+  public static final String AUTOPILOT_MEM = "Autopilot Memory";
   public static final String PERSON_FOLLOWING = "Person Following";
   public static final String OBJECT_NAV = "Object Tracking";
   public static final String MODEL_MANAGEMENT = "Model Management";
@@ -96,6 +97,9 @@ public class FeatureList {
     subCategories.add(
         new SubCategory(
             AUTOPILOT_SEQ, R.string.tile_autopilot_seq, R.drawable.ic_autopilot, "#5C7A8C"));
+    subCategories.add(
+        new SubCategory(
+            AUTOPILOT_MEM, R.string.tile_autopilot_mem, R.drawable.ic_autopilot, "#6B8E7F"));
     subCategories.add(
         new SubCategory(
             OBJECT_NAV, R.string.tile_object_nav, R.drawable.ic_person_search, "#E7CE88"));
