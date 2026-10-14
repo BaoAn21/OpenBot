@@ -292,8 +292,14 @@ def donkey_memory(img_width, img_height, bn=False, policy="autopilot", mem_len=3
     sigmoid throttle heads, which means it cannot predict reverse. The two heads are
     joined into the single (steering, throttle) output every other model here has.
 
-    use_cmd adds the indicator (Enums.VehicleIndicator) as a third, unnarrowed input
-    fused in alongside the memory branch, the same raw treatment pilot_net gives cmd.
+    use_cmd adds the indicator (Enums.VehicleIndicator) as a third input, conditioned
+    the way cil_mobile_fast does it: its own small MLP fused in once the image (and
+    memory) have been narrowed to 100 features, then the raw value again right before
+    the heads, so one weight can shift the steering per command. Fed in raw next to
+    the 8000 flattened image features instead, the model hardly used it - the memory
+    already explains the steering mid-turn - and flipping cmd 0 -> 1 moved its
+    steering by a third of what it moved in the data. Without use_cmd the network is
+    donkeycar's, unchanged.
     """
     if policy != "autopilot":
         raise Exception("donkey_memory only supports the autopilot policy")
@@ -324,18 +330,21 @@ def donkey_memory(img_width, img_height, bn=False, policy="autopilot", mem_len=3
         y = tf.keras.layers.Dense(2 * (mem_len - i), activation="relu")(y)
         y = tf.keras.layers.Dropout(drop2)(y)
 
+    x = tf.keras.layers.concatenate([x, y])
+    x = tf.keras.layers.Dense(100, activation="relu")(x)
+    x = tf.keras.layers.Dropout(drop)(x)
+
     inputs = (img_in, mem_in)
     if use_cmd:
         cmd_in = tf.keras.Input(shape=(1,), name="cmd_input")
-        x = tf.keras.layers.concatenate([x, y, cmd_in])
         inputs = (img_in, mem_in, cmd_in)
-    else:
-        x = tf.keras.layers.concatenate([x, y])
+        cmd = create_mlp(1, 16, 16, name="cmd")(cmd_in)
+        x = tf.keras.layers.concatenate([cmd, x])
 
-    x = tf.keras.layers.Dense(100, activation="relu")(x)
-    x = tf.keras.layers.Dropout(drop)(x)
     x = tf.keras.layers.Dense(50, activation="relu")(x)
     x = tf.keras.layers.Dropout(drop)(x)
+    if use_cmd:
+        x = tf.keras.layers.concatenate([cmd_in, x])
 
     steering = tf.keras.layers.Dense(1, activation="tanh", name="steering")(x)
     throttle = tf.keras.layers.Dense(1, activation="sigmoid", name="throttle")(x)
