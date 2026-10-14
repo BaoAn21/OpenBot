@@ -317,12 +317,15 @@ def load_tfrecord(tr: Training, verbose=0):
         )
 
     # Obtains the images shapes of records from .tfrecords.
-    for (image, cmd_input), label in train_dataset.take(1):
+    # Everything after the image: cmd, the goal, the memory, or the memory then cmd
+    # (donkey_memory with --mem_cmd).
+    for (image, *command_inputs), label in train_dataset.take(1):
         shape = image.numpy().shape
         tr.NETWORK_IMG_HEIGHT = shape[0]
         tr.NETWORK_IMG_WIDTH = shape[1]
         print("Image shape: ", shape)
-        print("Command: ", cmd_input.numpy())
+        for command_input in command_inputs:
+            print("Command: ", command_input.numpy())
         print("Label: ", label.numpy())
 
     if tr.hyperparameters.POLICY == "autopilot":

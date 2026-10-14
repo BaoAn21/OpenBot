@@ -53,7 +53,9 @@ def prepare_for_training(
 
 
 def show_batch(dataset, policy="autopilot", model=None, fig_num=1):
-    (image_batch, cmd_batch), label_batch = next(iter(dataset))
+    # extra_batches holds the cmd of a memory model trained with --mem_cmd, which
+    # comes after its memory; it is empty for every other model.
+    (image_batch, cmd_batch, *extra_batches), label_batch = next(iter(dataset))
     NUM_SAMPLES = min(image_batch.numpy().shape[0], 15)
 
     if policy == "autopilot":
@@ -65,6 +67,7 @@ def show_batch(dataset, policy="autopilot", model=None, fig_num=1):
                 (
                     tf.slice(image_batch, [0, 0, 0, 0], [NUM_SAMPLES, -1, -1, -1]),
                     cmd_batch[:NUM_SAMPLES],
+                    *(batch[:NUM_SAMPLES] for batch in extra_batches),
                 )
             )
     elif policy == "point_goal_nav":
@@ -82,6 +85,12 @@ def show_batch(dataset, policy="autopilot", model=None, fig_num=1):
 
     plt.figure(num=fig_num, figsize=size)
 
+    def command_text(n):
+        text = "%s: %s" % (command_input_name, np.round(cmd_batch.numpy()[n], 2))
+        for batch in extra_batches:
+            text += ", Cmd: %s" % np.round(batch.numpy()[n], 2)
+        return text
+
     for n in range(NUM_SAMPLES):
         ax = plt.subplot(5, 3, n + 1)
         # For stacked-frame inputs only the newest frame (the last three channels) is
@@ -89,20 +98,18 @@ def show_batch(dataset, policy="autopilot", model=None, fig_num=1):
         plt.imshow(image_batch[n][..., -3:])
         if model is None:
             plt.title(
-                "%s: %s, Label: [%.2f %.2f]"
+                "%s, Label: [%.2f %.2f]"
                 % (
-                    command_input_name,
-                    np.round(cmd_batch.numpy()[n], 2),
+                    command_text(n),
                     float(label_batch[n][0]),
                     float(label_batch[n][1]),
                 )
             )
         else:
             plt.title(
-                "%s: %s, Label: [%.2f %.2f], Pred: [%.2f %.2f]"
+                "%s, Label: [%.2f %.2f], Pred: [%.2f %.2f]"
                 % (
-                    command_input_name,
-                    np.round(cmd_batch.numpy()[n], 2),
+                    command_text(n),
                     float(label_batch[n][0]),
                     float(label_batch[n][1]),
                     float(pred_batch[n][0]),
@@ -168,30 +175,23 @@ def compare_tf_tflite(
         raise Exception("Unknown policy")
 
     # Test the TensorFlow Lite model on input data. If no data provided, generate random data.
+    # Every input is filled, keyed by its Keras name (the converter turns img_input into
+    # serving_default_img_input:0), so a memory model's extra cmd_input gets data too.
     input_data = {}
     for input_detail in input_details:
-        if "img_input" in input_detail["name"]:
-            if img is None:
-                input_data["img_input"] = np.array(
-                    np.random.random_sample(input_detail["shape"]), dtype=np.float32
-                )
-            else:
-                print(img)
-                input_data["img_input"] = img
-            interpreter.set_tensor(input_detail["index"], input_data["img_input"])
-        elif command_input_name in input_detail["name"]:
-            if cmd is None:
-                input_data[command_input_name] = np.array(
-                    np.random.random_sample(input_detail["shape"]), dtype=np.float32
-                )
-            else:
-                print(cmd)
-                input_data[input_detail["name"]] = cmd[0]
-            interpreter.set_tensor(
-                input_detail["index"], input_data[command_input_name]
-            )
+        name = input_detail["name"].replace("serving_default_", "").split(":")[0]
+        if name == "img_input" and img is not None:
+            print(img)
+            value = img
+        elif name == command_input_name and cmd is not None:
+            print(cmd)
+            value = cmd[0]
         else:
-            ValueError("Unknown input")
+            value = np.array(
+                np.random.random_sample(input_detail["shape"]), dtype=np.float32
+            )
+        input_data[name] = value
+        interpreter.set_tensor(input_detail["index"], value)
 
     interpreter.invoke()
 
@@ -199,10 +199,7 @@ def compare_tf_tflite(
     # Use `tensor()` in order to get a pointer to the tensor.
     tflite_results = interpreter.get_tensor(output_details[0]["index"])
     tf_results = model.predict(
-        (
-            tf.constant(input_data["img_input"]),
-            tf.constant(input_data[command_input_name]),
-        )
+        tuple(tf.constant(input_data[name]) for name in model.input_names)
     )
     print("tflite:", tflite_results)
     print("tf:", tf_results)
