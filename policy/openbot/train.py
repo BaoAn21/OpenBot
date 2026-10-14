@@ -73,6 +73,8 @@ class Hyperparameters:
     MEM_LEN: int = 0
     # Current-frame indicator fed into a memory model alongside the memory input.
     MEM_CMD: bool = False
+    # Colour augmentation for a memory model. Every other model always gets it.
+    COLOR_AUG: bool = False
 
     USE_LAST: bool = False
 
@@ -120,6 +122,8 @@ class Hyperparameters:
             model_name += f"_mem{self.MEM_LEN}"
             if self.MEM_CMD:
                 model_name += "_cmd"
+            if self.COLOR_AUG:
+                model_name += "_color"
 
         return model_name
 
@@ -247,6 +251,10 @@ def load_tfrecord(tr: Training, verbose=0):
         if mem_len:
             # donkeycar's memory model: the previous controls take the place of the
             # cmd input, and its default config applies no augmentation at all.
+            # --color_aug opts into the same colour jitter the other models get;
+            # flipping stays out, it would contradict the recorded memory.
+            if tr.hyperparameters.COLOR_AUG:
+                image = data_augmentation.augment_img(image)
             label = [features["left"], features["right"]]
             if tr.hyperparameters.MEM_CMD:
                 return (image, features["mem"], features["cmd"]), label
@@ -883,6 +891,12 @@ if __name__ == "__main__":
         "indicator (cmd) into the model",
     )
     parser.add_argument(
+        "--color_aug",
+        action="store_true",
+        help="memory policy (--model donkey_memory): random hue/saturation/brightness/"
+        "contrast on the training images, which every other model always gets",
+    )
+    parser.add_argument(
         "--batch_size",
         type=int,
         default=128,
@@ -966,6 +980,11 @@ if __name__ == "__main__":
         parser.error(f"--mem_len needs --model donkey_memory, not {params.MODEL}")
     if args.mem_cmd and not is_mem_model:
         parser.error(f"--mem_cmd needs --model donkey_memory, not {params.MODEL}")
+    if args.color_aug and not is_mem_model:
+        parser.error(
+            f"--color_aug is for --model donkey_memory; {params.MODEL} always gets "
+            "colour augmentation"
+        )
     if is_mem_model:
         if params.SEQ_LEN > 1 or args.trim_stationary:
             parser.error(f"--model {params.MODEL} takes no stacked-frame options")
@@ -976,6 +995,7 @@ if __name__ == "__main__":
             )
         params.MEM_LEN = args.mem_len or tfrecord_mem.DEFAULT_MEM_LEN
         params.MEM_CMD = args.mem_cmd
+        params.COLOR_AUG = args.color_aug
         # The architecture has no batch norm; keep the model name honest about it.
         params.BATCH_NORM = False
 
