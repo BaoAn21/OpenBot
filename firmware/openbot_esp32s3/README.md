@@ -107,9 +107,9 @@ All at the top of `openbot_esp32s3.ino`:
 | `SERVO_LEFT_US` / `SERVO_RIGHT_US` | 1550 / 1080 | Pulses with the wheels just at the left / right stop |
 | `THROTTLE_INVERT` | false | The car drives backwards when it should go forward |
 | `MOTOR_DRIVER` | `ESC` | `HBRIDGE` for a two-input H-bridge |
-| `ESC_FORWARD_MAX_US` / `ESC_REVERSE_MAX_US` | 1560 / 1435 | Full forward / reverse throttle. The WLtoys 144001 is very fast, so these sit just past where the motor starts |
+| `ESC_FORWARD_MAX_US` / `ESC_REVERSE_MAX_US` | 1565 / 1425 | Full forward / reverse throttle. The WLtoys 144001 is very fast, so these sit just past where the motor starts |
 | `ESC_NEUTRAL_US` | 1500 | The ESC doesn't stop at throttle 0 (it learns neutral at switch-on, so this rarely needs changing) |
-| `ESC_FORWARD_DEADBAND_US` / `ESC_REVERSE_DEADBAND_US` | 38 / 40 | Gap from neutral to the smallest throttle, so the stick starts where the motor does. Measured off the ground: forward buzzes at ~1539 µs and turns at ~1545, reverse buzzes at ~1460 and turns at ~1444 |
+| `ESC_FORWARD_DEADBAND_US` / `ESC_REVERSE_DEADBAND_US` | 40 / 45 | Gap from neutral to the smallest throttle, so the stick starts where the motor does (set a little above the off-ground thresholds, so the car still moves on the ground). Measured off the ground: forward buzzes at ~1539 µs and turns at ~1545, reverse buzzes at ~1460 and turns at ~1444 |
 | `MOTOR_MIN_PWM` | 0 | H-bridge: the motor hums but doesn't move at low throttle (try 60–100) |
 | `MOTOR_BRAKE` | false | H-bridge: `true` = brake at zero throttle, `false` = coast |
 | `HAS_GAMEPAD` | false | `true` to drive from an Xbox controller when no phone is attached |

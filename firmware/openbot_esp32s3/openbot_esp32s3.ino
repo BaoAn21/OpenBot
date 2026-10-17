@@ -49,10 +49,10 @@ const String robot_type = "TDISPLAY_S3";
 #define ESC_NEUTRAL_US 1500
 // Measured on the WLtoys 144001 off the ground: forward buzzes at ~1539 us and turns at ~1545,
 // reverse buzzes at ~1460 and turns at ~1444. The ESC goes up to 2000/1000, far too fast.
-#define ESC_FORWARD_MAX_US 1560     // full forward
-#define ESC_REVERSE_MAX_US 1435     // full reverse
-#define ESC_FORWARD_DEADBAND_US 38  // gap from neutral to the smallest forward throttle
-#define ESC_REVERSE_DEADBAND_US 40  // gap from neutral to the smallest reverse throttle
+#define ESC_FORWARD_MAX_US 1565     // full forward
+#define ESC_REVERSE_MAX_US 1425     // full reverse
+#define ESC_FORWARD_DEADBAND_US 40  // gap from neutral to the smallest forward throttle
+#define ESC_REVERSE_DEADBAND_US 45  // gap from neutral to the smallest reverse throttle
 
 // Stop the car if no heartbeat arrives within the interval the phone asked for.
 #define DEFAULT_HEARTBEAT_MS 1000
