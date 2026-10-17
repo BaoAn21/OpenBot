@@ -47,9 +47,12 @@ const String robot_type = "TDISPLAY_S3";
 // The ESC learns neutral when it is switched on, so switch it on after the board is running.
 #define PIN_ESC 1
 #define ESC_NEUTRAL_US 1500
-#define ESC_FORWARD_MAX_US 2000 // lower (e.g. 1700) to cap top speed
-#define ESC_REVERSE_MAX_US 1000 // raise (e.g. 1300) to cap reverse speed
-#define ESC_DEADBAND_US 0       // jump past neutral on any throttle, if the motor starts late
+// Measured on the WLtoys 144001 off the ground: forward buzzes at ~1539 us and turns at ~1545,
+// reverse buzzes at ~1460 and turns at ~1444. The ESC goes up to 2000/1000, far too fast.
+#define ESC_FORWARD_MAX_US 1560     // full forward
+#define ESC_REVERSE_MAX_US 1435     // full reverse
+#define ESC_FORWARD_DEADBAND_US 38  // gap from neutral to the smallest forward throttle
+#define ESC_REVERSE_DEADBAND_US 40  // gap from neutral to the smallest reverse throttle
 
 // Stop the car if no heartbeat arrives within the interval the phone asked for.
 #define DEFAULT_HEARTBEAT_MS 1000
@@ -145,9 +148,9 @@ void write_throttle(int throttle) {
   if (THROTTLE_INVERT) throttle = -throttle;
   int us = ESC_NEUTRAL_US;
   if (throttle > 0) {
-    us = map(throttle, 1, CTRL_MAX, ESC_NEUTRAL_US + ESC_DEADBAND_US, ESC_FORWARD_MAX_US);
+    us = map(throttle, 1, CTRL_MAX, ESC_NEUTRAL_US + ESC_FORWARD_DEADBAND_US, ESC_FORWARD_MAX_US);
   } else if (throttle < 0) {
-    us = map(throttle, -CTRL_MAX, -1, ESC_REVERSE_MAX_US, ESC_NEUTRAL_US - ESC_DEADBAND_US);
+    us = map(throttle, -CTRL_MAX, -1, ESC_REVERSE_MAX_US, ESC_NEUTRAL_US - ESC_REVERSE_DEADBAND_US);
   }
   write_pulse_us(PIN_ESC, us);
 }
