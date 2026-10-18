@@ -30,6 +30,10 @@ public class SharedPreferencesManager {
   private static final String AUTOPILOT_MODEL = "AUTOPILOT_MODEL_NAME";
   private static final String AUTOPILOT_SEQ_MODEL = "AUTOPILOT_SEQ_MODEL_NAME";
   private static final String AUTOPILOT_MEM_MODEL = "AUTOPILOT_MEM_MODEL_NAME";
+  private static final String AUTOPILOT_SESSION_FORWARD_MODEL =
+      "AUTOPILOT_SESSION_FORWARD_MODEL_NAME";
+  private static final String AUTOPILOT_SESSION_BACKWARD_MODEL =
+      "AUTOPILOT_SESSION_BACKWARD_MODEL_NAME";
   private static final String SERVER_NAME = "SERVER_NAME";
 
   private static final String OBJECT_TYPE = "OBJECT_TYPE";
@@ -136,6 +140,22 @@ public class SharedPreferencesManager {
 
   public String getAutopilotMemModel() {
     return preferences.getString(AUTOPILOT_MEM_MODEL, "");
+  }
+
+  public void setAutopilotSessionForwardModel(String model) {
+    preferences.edit().putString(AUTOPILOT_SESSION_FORWARD_MODEL, model).apply();
+  }
+
+  public String getAutopilotSessionForwardModel() {
+    return preferences.getString(AUTOPILOT_SESSION_FORWARD_MODEL, "");
+  }
+
+  public void setAutopilotSessionBackwardModel(String model) {
+    preferences.edit().putString(AUTOPILOT_SESSION_BACKWARD_MODEL, model).apply();
+  }
+
+  public String getAutopilotSessionBackwardModel() {
+    return preferences.getString(AUTOPILOT_SESSION_BACKWARD_MODEL, "");
   }
 
   public void setServer(String server) {

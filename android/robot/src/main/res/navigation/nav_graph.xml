@@ -26,6 +26,9 @@
             android:id="@+id/action_mainFragment_to_autopilotMemFragment"
             app:destination="@id/AIMemFragment" />
         <action
+            android:id="@+id/action_mainFragment_to_autopilotSessionFragment"
+            app:destination="@id/AISessionFragment" />
+        <action
             android:id="@+id/action_mainFragment_to_controllerMappingFragment"
             app:destination="@id/controllerMappingFragment" />
         <action
@@ -117,6 +120,12 @@
         android:name="org.openbot.autopilot.AutopilotMemFragment"
         android:label="fragment_ai_mem"
         tools:layout="@layout/fragment_autopilot" />
+
+    <fragment
+        android:id="@+id/AISessionFragment"
+        android:name="org.openbot.autopilot.AutopilotSessionFragment"
+        android:label="fragment_ai_session"
+        tools:layout="@layout/fragment_autopilot_session" />
 
     <fragment
         android:id="@+id/controllerMappingFragment"

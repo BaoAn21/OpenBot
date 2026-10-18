@@ -186,7 +186,7 @@ npm run build
 **Policy training vs. on-device inference.** `policy/` is where models are trained (TensorFlow, `policy/openbot/train.py`, driven from `policy_learning.ipynb`); the resulting model gets exported (e.g. `python/export_openvino.py`) and consumed either by the Android robot app (on-phone inference) or by `python/infer.py` (on-Linux inference via `run.py --mode inference`, selectable backend: `tf`, `tflite`, `openvino`). Data collected in joystick mode (`run.py --mode joystick` or the Android app's data-collection mode) is the training data format `policy/` expects.
 
 **Android layouts are duplicated for landscape.** `android/robot/src/main/res/layout-land/`
-holds landscape variants of 11 layouts (`fragment_autopilot`, `fragment_free_roam`,
+holds landscape variants of 12 layouts (`fragment_autopilot`, `fragment_autopilot_session`, `fragment_free_roam`,
 `fragment_logger`, `fragment_object_nav`, `fragment_robot_info`,
 `fragment_controller_mapping`, `fragment_edit_profile`, `fragment_blockly_executing`,
 `fragment_bar_code_scanner`, `dialog_sensors`, `layout_bottom_sheet`). A view added to

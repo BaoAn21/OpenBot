@@ -410,7 +410,7 @@ public abstract class ControlsFragment extends Fragment implements ServerListene
   }
 
   /** Gamepad buttons work like a car's stalk: press once to switch on, again to switch off. */
-  private void toggleIndicatorButton(Enums.VehicleIndicator indicator, String command) {
+  protected void toggleIndicatorButton(Enums.VehicleIndicator indicator, String command) {
     if (vehicle.getIndicator() == indicator.getValue()) {
       toggleIndicatorEvent(Enums.VehicleIndicator.STOP.getValue());
       processControllerKeyData(Constants.CMD_INDICATOR_STOP);
