@@ -633,12 +633,15 @@ public class AutopilotSessionFragment extends CameraFragment {
                         lastProcessingTimeMs = SystemClock.elapsedRealtime() - startTime;
                         computingNetwork = false;
                     });
-            if (lastProcessingTimeMs > 0)
+            // Read once: the inference thread can set it to 0 (a frame of the switch stop) before
+            // the UI thread runs this.
+            final long processingMs = lastProcessingTimeMs;
+            if (processingMs > 0)
                 requireActivity()
                         .runOnUiThread(
                                 () ->
                                         binding.inferenceInfo.setText(
-                                                String.format(Locale.US, "%d fps", 1000 / lastProcessingTimeMs)));
+                                                String.format(Locale.US, "%d fps", 1000 / processingMs)));
         }
     }
 
