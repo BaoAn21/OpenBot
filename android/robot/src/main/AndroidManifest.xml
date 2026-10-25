@@ -112,6 +112,14 @@
             android:name="com.google.android.gms.vision.DEPENDENCIES"
             android:value="barcode" />
 
+        <!-- Don't send crash reports or usage statistics to the upstream OpenBot Firebase project. -->
+        <meta-data
+            android:name="firebase_crashlytics_collection_enabled"
+            android:value="false" />
+        <meta-data
+            android:name="firebase_analytics_collection_deactivated"
+            android:value="true" />
+
         <!--
             Lets AndroidX restore the per-app language on cold start for API 32 and below,
             where AppCompatDelegate.setApplicationLocales() falls back to its own file-based
