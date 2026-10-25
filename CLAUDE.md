@@ -120,9 +120,16 @@ an empty `ctrlLog.txt` makes that raise, park it instead. Its val metrics are te
 
 **Dataset layout.** Only `dataset/{train,test}_data/<set>/<session>` is trained on; sessions
 not in use are parked under `dataset/_other_sessions/` in the same split structure. Current
-sets are `indicator_training` + `indicator_data_session_2` (cmd 0/1, no left yet); the old
-`my_dataset_1/2` are parked. `make_forward_only.py` sets every cmd to 0 - never run it on
-indicator data. `policy/EXPERIMENTS.md` logs every dataset and trained model (models/ and
+sets are the Autopilot Session ones: `fwdbwd_forward` (donkey_memory, records in
+`tfrecords_mem3/`) and `fwdbwd_backward` (cil_mobile_fast, cmd 2, records in `tfrecords/`).
+Both come from recordings that mix forward and backward driving, kept matched under
+`_other_sessions/fwdbwd_raw/<raw_set>/` and split with `python split_direction.py <raw_set>`
+(see its docstring). Only one of the two sets is in `train_data/test_data` at a time: training
+without `--create_tf_record` reads only the records, so a swap is needed only to rebuild a
+set's records (`python -m openbot.tfrecord_mem --mem_len 3` for forward). The indicator sets
+(`indicator_training`, `indicator_data_session_2`) are another session on another track and
+`my_dataset_1/2` are older still; all are parked and not trained on. `make_forward_only.py`
+sets every cmd to 0 - never run it on indicator data. `policy/EXPERIMENTS.md` logs every dataset and trained model (models/ and
 dataset/ are gitignored); add an entry for each new run.
 
 `policy/frontend` is a separate CRA app (own `package.json`): `npm start`, `npm run build`, `npm test` inside `policy/frontend`.
@@ -201,6 +208,6 @@ overlay that works in portrait lands behind it.
 
 **Driving control is Ackermann-style (steering + throttle), not differential (left/right).** `android/robot/src/main/java/org/openbot/vehicle/Control.java` and `Vehicle.java` represent commands as a `steering`/`throttle` pair in raw device units `[-255, 255]` (`Control.MAX`), not as independent left/right wheel speeds. `Control.fromLeftRight(left, right)` is the conversion point for callers that still produce a normalized differential-drive pair (TFLite models, the object tracker, phone/web controllers) — it maps `(left, right)` in `[-1, 1]` to `(steering, throttle)`. `Vehicle.getLeftSpeed()/getRightSpeed()` no longer exist; use `getSteering()`/`getThrottle()`. The serial protocol to the firmware changed accordingly: `sendControl()` now sends `c<steering>,<throttle>\n` instead of `c<left>,<right>\n`. `firmware/openbot_esp32s3/` parses this format; `firmware/openbot/openbot.ino` still parses `c<left>,<right>` and would misread it. Keep `python/` in sync too if it speaks the same protocol.
 
-**Indicator values: -1 left, 0 off, 1 right, 2 reverse.** (`Enums.VehicleIndicator`; an earlier test build used 1 = reverse — that is gone, but the `*.with_reverse` label backups of sessions recorded before 2026-09-26 (`my_dataset_1/2`) still carry it.) `Vehicle.setIndicator()` sends them as `i1,0`, `i0,0`, `i0,1` and `i0,0,1`; the third field of `i<left>,<right>[,<reverse>]` is optional, so two-field messages still work. The indicator value is also the model's `cmd` input (`tflite/Autopilot*.java`) and is logged to `indicatorLog.txt` as the training `cmd`, so reverse shows up as `cmd 2`. Before training on such data, check `policy/openbot/data_augmentation.py`: `flip_sample` negates `cmd` and `augment_cmd` randomly turns 0 into ±1, which is wrong for a reverse value. On the gamepad the indicators toggle like a car stalk (`ControlsFragment.toggleIndicatorButton`): square = left, circle = right, triangle = reverse; pressing the active one again turns it off. The phone/web controller apps still use their left/right/stop commands.
+**Indicator values: -1 left, 0 off, 1 right, 2 reverse.** (`Enums.VehicleIndicator`; an earlier test build used 1 = reverse — that is gone, but the `*.with_reverse` label backups of sessions recorded before 2026-09-26 (`my_dataset_1/2`) still carry it.) `Vehicle.setIndicator()` sends them as `i1,0`, `i0,0`, `i0,1` and `i0,0,1`; the third field of `i<left>,<right>[,<reverse>]` is optional, so two-field messages still work. The indicator value is also the model's `cmd` input (`tflite/Autopilot*.java`) and is logged to `indicatorLog.txt` as the training `cmd`, so reverse shows up as `cmd 2`. In `policy/openbot/data_augmentation.py`, `flip_sample` mirrors only ±1 and leaves 0 and 2 alone, and `augment_cmd` only touches 0, so both are safe on reverse (`cmd 2`) data. The backward model of the Autopilot Session screen is trained on `cmd 2`, because that is what the phone feeds it while reversing. On the gamepad the indicators toggle like a car stalk (`ControlsFragment.toggleIndicatorButton`): square = left, circle = right, triangle = reverse; pressing the active one again turns it off. The phone/web controller apps still use their left/right/stop commands.
 
 When chaging code, remember to show me first.

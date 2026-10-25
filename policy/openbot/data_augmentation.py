@@ -92,7 +92,9 @@ def flip_sample(img, cmd, label):
     """
     do_flip = tf.random.uniform([]) < 0.5
     img = tf.cond(do_flip, lambda: tf.image.flip_left_right(img), lambda: img)
-    cmd = tf.cond(do_flip, lambda: -cmd, lambda: cmd)
+    # Only left/right (-1/1) mirror; straight (0) and reverse (2) stay as they are.
+    flipped_cmd = tf.where(tf.equal(tf.abs(cmd), 1.0), -cmd, cmd)
+    cmd = tf.cond(do_flip, lambda: flipped_cmd, lambda: cmd)
     label = tf.cond(
         do_flip,
         lambda: tf.stack([-label[0], label[1]]),
