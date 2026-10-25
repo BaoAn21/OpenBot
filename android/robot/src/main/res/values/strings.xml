@@ -246,6 +246,7 @@
     <string name="backward_model">Backward</string>
     <string name="direction_forward">FORWARD</string>
     <string name="direction_backward">BACKWARD</string>
+    <string name="takeover_active">MANUAL</string>
     <string name="tile_object_nav">Object Tracking</string>
     <string name="tile_point_goal_navigation">Point Goal Navigation</string>
     <string name="tile_model_management">Model Management</string>

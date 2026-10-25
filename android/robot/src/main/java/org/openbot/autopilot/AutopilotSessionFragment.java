@@ -64,6 +64,10 @@ import timber.log.Timber;
  * ESC in F/R mode a small positive throttle would drive forward in the middle of a reverse. The
  * switch decides the direction, the model only how much.
  *
+ * <p>Moving the gamepad stick while autopilot is on takes over: you drive, the models don't run,
+ * and the forward model's memory follows what the car does. Once the stick has been centred for
+ * {@link #TAKEOVER_RELEASE_MS} the models drive again.
+ *
  * <p>The forward spinner only offers CMDNAV_MEM models and the backward one only CMDNAV models:
  * donkey_memory's sigmoid throttle can never reverse, so it would silently drive forward there.
  */
@@ -78,6 +82,9 @@ public class AutopilotSessionFragment extends CameraFragment {
 
     /** How long the car stands still on a switch before the other model drives. */
     private static final long SWITCH_PAUSE_MS = 500;
+
+    /** After the stick is back in the centre, how long until the models drive again. */
+    private static final long TAKEOVER_RELEASE_MS = 300;
 
     private FragmentAutopilotSessionBinding binding;
     private Handler handler;
@@ -107,6 +114,12 @@ public class AutopilotSessionFragment extends CameraFragment {
     private boolean lastReverse = false;
 
     private long switchUntilMs = 0;
+
+    /** The stick while you take over from the models. Written on the UI thread. */
+    private volatile Control humanControl = new Control(0, 0);
+
+    /** You drive until then: MAX_VALUE while the stick is off centre. */
+    private volatile long humanUntilMs = 0;
 
     /** Set once the camera delivered a frame, so the crops can be sized to it. */
     private volatile boolean frameConfigured = false;
@@ -482,6 +495,28 @@ public class AutopilotSessionFragment extends CameraFragment {
         }
     }
 
+    @Override
+    protected void handleJoystickControl(Control control) {
+        if (binding == null || !binding.autoSwitch.isChecked()) {
+            super.handleJoystickControl(control);
+            return;
+        }
+        // Any stick input takes over from the models until the stick has been centred for
+        // TAKEOVER_RELEASE_MS. drive() keeps sending it each frame, so the models can't
+        // overwrite it.
+        humanControl = control;
+        if (control.getSteering() != 0 || control.getThrottle() != 0) {
+            humanUntilMs = Long.MAX_VALUE;
+            super.handleJoystickControl(control); // right away, not on the next frame
+        } else if (humanUntilMs == Long.MAX_VALUE) {
+            humanUntilMs = SystemClock.elapsedRealtime() + TAKEOVER_RELEASE_MS;
+        }
+    }
+
+    private boolean isTakenOver() {
+        return SystemClock.elapsedRealtime() < humanUntilMs;
+    }
+
     /** Which model drives. Read on the inference thread, so a switch lands between two frames. */
     private boolean isReversing() {
         return vehicle.getIndicator() == Enums.VehicleIndicator.REVERSE.getValue();
@@ -576,6 +611,7 @@ public class AutopilotSessionFragment extends CameraFragment {
     }
 
     private void setNetworkEnabled(boolean b) {
+        humanUntilMs = 0;
         binding.autoSwitch.setChecked(b);
         emitNetworkStatus(b);
         binding.controllerContainer.controlMode.setEnabled(!b);
@@ -636,12 +672,15 @@ public class AutopilotSessionFragment extends CameraFragment {
             // Read once: the inference thread can set it to 0 (a frame of the switch stop) before
             // the UI thread runs this.
             final long processingMs = lastProcessingTimeMs;
-            if (processingMs > 0)
+            final boolean manual = isTakenOver();
+            if (manual || processingMs > 0)
                 requireActivity()
                         .runOnUiThread(
                                 () ->
                                         binding.inferenceInfo.setText(
-                                                String.format(Locale.US, "%d fps", 1000 / processingMs)));
+                                                manual
+                                                        ? getString(R.string.takeover_active)
+                                                        : String.format(Locale.US, "%d fps", 1000 / processingMs)));
         }
     }
 
@@ -653,6 +692,17 @@ public class AutopilotSessionFragment extends CameraFragment {
             resetMemory();
             switchUntilMs = SystemClock.elapsedRealtime() + SWITCH_PAUSE_MS;
             Timber.i("Switched to the %s model", reverse ? "backward" : "forward");
+        }
+        if (isTakenOver()) {
+            // You drive. The forward model's memory gets what the car actually did, as in the
+            // recorded data, so it carries on from your driving when you let go.
+            Control human = humanControl;
+            if (!reverse && memory != null) {
+                pushMemory(human);
+                showMemory(memory.clone());
+            }
+            handleDriveCommand(human);
+            return;
         }
         if (SystemClock.elapsedRealtime() < switchUntilMs) {
             // Let the car stop before the other model drives.

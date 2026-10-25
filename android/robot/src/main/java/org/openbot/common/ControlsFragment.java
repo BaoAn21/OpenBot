@@ -96,7 +96,8 @@ public abstract class ControlsFragment extends Fragment implements ServerListene
                 return;
               }
               MotionEvent motionEvent = result.getParcelable(Constants.DATA);
-              vehicle.setControl(vehicle.getGameController().processJoystickInput(motionEvent, -1));
+              handleJoystickControl(
+                  vehicle.getGameController().processJoystickInput(motionEvent, -1));
               processControllerKeyData(Constants.CMD_DRIVE);
             });
     requireActivity()
@@ -382,6 +383,11 @@ public abstract class ControlsFragment extends Fragment implements ServerListene
         return;
       }
     }
+  }
+
+  /** Where the gamepad stick goes. A screen that drives by itself can take it over. */
+  protected void handleJoystickControl(Control control) {
+    vehicle.setControl(control);
   }
 
   // Override in Autopilot / Object Nav — they use network mode for ML, not just a toggle.
