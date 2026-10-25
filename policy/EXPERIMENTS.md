@@ -5,7 +5,7 @@ Running log of the datasets, trained models and results, kept for the thesis.
 versioned record of what is in them. Add an entry for every new run (template at the
 bottom) and keep the old ones: negative results are results too.
 
-Last updated: 2026-10-14.
+Last updated: 2026-10-25.
 
 ## Setup in short
 
@@ -30,6 +30,13 @@ Last updated: 2026-10-14.
 | `train_data/indicator_data_session_2`, `test_data/indicator_data_session_2` | 2026-10-13 evening, 2026-10-14 morning | 32 / 8 | 3,231 / 806 | 0 and 1 (right) | Indicator dataset 2. Test sessions: `20261013_203838`, `_203927`, `_204019`, `20261014_071641`, `_071735`, `_071828`, `_071921`, `_071941`. |
 | `_other_sessions/empty_sessions/20261013_203750` | 2026-10-13 | n/a | 39 frames, no controls | n/a | Empty `ctrlLog.txt`; matching raises on it. |
 | `policy/dataset_reverse/` | built 2026-09-09 | n/a | n/a | n/a | Reverse-only copy built by `build_reverse_dataset.py` for the reverse test runs. |
+| `fwdbwd/` session 1 | 2026-10-17, 10-19, daylight | 71 recordings, test = every 5th (14) | fwd 9,534 / 2,455, bwd 3,405 / 736 | fwd 0, bwd 2 | Autopilot Session data: forward and backward driving, split by `split_direction.py` (see `FWDBWD.md`). Was `fwdbwd_session_1`. 2 empty recordings of 10-17 (`123514`, `123631`) are in `_other_sessions/empty_sessions/`. |
+| `fwdbwd/` session 2 | 2026-10-20 evening | 47 recordings, test = every 5th (9) | fwd 3,638 / 1,199, bwd 2,010 / 532 | fwd 0, bwd 2 | 28 recordings (`203857`-`204510`) under warm yellow lamps (red/blue ~7, half the brightness), 19 neutral. Was `fwdbwd_session_2`. |
+| `fwdbwd/` session 3 | 2026-10-25 late morning | 46 recordings, test = random 20%, seed 0 (9) | fwd 2,831 frames in 32 runs (2,236 / 595), bwd 898 / 302 | fwd 0, bwd 2 | Neutral light. |
+
+Frames for fwdbwd are images per split folder; the memory records drop the first 3 frames of
+every forward run. Records for sessions 1 + 2 + 3 (2026-10-25): fwd 14,892 / 4,111 examples,
+bwd 6,313 / 1,570.
 
 **There is no left-turn (cmd -1) data in any indicator set yet.**
 
@@ -42,6 +49,8 @@ trained, so they are only comparable within the same test set:
 - **T1-fwd:** `my_dataset_2`, forward-only (after 2026-10-10).
 - **T2:** `indicator_training` test (6 sessions, 685 frames; 667 examples in the memory records).
 - **T3:** T2 + `indicator_data_session_2` test (14 sessions, 1,491 frames; 1,449 memory examples).
+- **F1 / F12 / F123:** the fwdbwd test splits of sessions 1, 1 + 2 and 1 + 2 + 3, for the
+  fwd and the bwd model alike. A model's `data_manifest.txt` lists its exact sessions.
 
 For a fair comparison, re-evaluate the `.tflite` files on one fixed test set; see "How to
 compare" below.
@@ -66,6 +75,19 @@ listed with the run they came from; identity was checked by md5.
 
 Run B's val numbers are on T3 (bigger, harder) and are not comparable with the T2 rows above.
 Run A's checkpoints and logs were overwritten by run B; only its `.tflite` survives.
+
+### Autopilot Session models (fwd donkey_memory + bwd cil_mobile_fast)
+
+Trained on the fwdbwd sessions. From 2026-10-25 on, `train_fwdbwd.py` names the folders
+after the sessions (`fwd_s1-2-3_...`) and puts a `data_manifest.txt` in them. Epochs are
+as in `logs/log.csv` (counting from 0).
+
+| Folder | Date | Model and options | Trained on | Test set | Best val epoch | val angle<0.1 / dir / throttle<0.1 / MAE | On the robot |
+|---|---|---|---|---|---|---|---|
+| `openbot_donkey_memory_lr0.0003_bz128_mem3_color_fwdbwd1` | 10-20 | donkey_memory, mem 3, `--color_aug`, no cmd | session 1 fwd (9,225 / 2,377 examples) | F1 | 52 | 0.485 / 0.894 / 0.571 / 0.131 | Not recorded. Closed-loop steering MAE 0.187 vs 0.151 teacher-forced; overfits after ~50. |
+| `openbot_cil_mobile_fast_lr0.0003_bz128_bn_flip_fwdbwd1` | 10-20 | cil_mobile_fast, BN, `--flip_aug` (cmd 2 kept on flips) | session 1 bwd (3,405 / 736) | F1 | 80 | 0.519 / 0.769 / 0.865 / 0.197 | Not recorded. |
+| `openbot_donkey_memory_lr0.0003_bz128_mem3_color` | 10-21 | as `_fwdbwd1` | sessions 1 + 2 fwd (12,734 / 3,534) | F12 | 17 | 0.532 / 0.900 / 0.636 / 0.115 | Not recorded. |
+| `openbot_cil_mobile_fast_lr0.0003_bz128_bn_flip` | 10-21 | as `_fwdbwd1` | sessions 1 + 2 bwd (5,415 / 1,268) | F12 | 65 | 0.516 / 0.728 / 0.862 / 0.209 | Not recorded. |
 
 ### Earlier experiments (before the indicator work)
 
@@ -163,7 +185,7 @@ Not yet evaluated offline: `donkey_mem_color_aug_cmd.tflite`, `donkey_color_cmd_
 
 ```
 ### <folder name>, <date>
-- Command: python -m openbot.train ...
+- Command: python train_fwdbwd.py ... (or python -m openbot.train ...)
 - Git commit: <hash> (and whether the working tree had uncommitted changes)
 - Trained on: <dataset folders>, <train/test examples from the tfrecord log>
 - Test set: T?

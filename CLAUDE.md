@@ -109,8 +109,8 @@ the indicator, wired like `cil_mobile_fast` (own 16-16 MLP fused after the Dense
 cmd again before the heads) - fed in raw beside the 8000 flattened image features it was
 barely used. `--color_aug` opts into the colour jitter every other model always gets (they
 reject the flag). Plain MSE, no flip/cmd aug. Records live in `dataset/tfrecords_mem<N>/`,
-shared by runs with and without `--mem_cmd`, so pass `--create_tf_record` after any data
-change. That path only *reads* `matched_frame_ctrl_cmd_processed.txt` and never runs
+shared by runs with and without `--mem_cmd`, so rebuild them after any data change
+(`train_fwdbwd.py` does that for the fwdbwd data; `--create_tf_record` for `train_data`). That path only *reads* `matched_frame_ctrl_cmd_processed.txt` and never runs
 `associate_frames`, so freshly recorded sessions must be matched first
 (`associate_frames.match_frame_ctrl_input(<split dir>, [<dataset>], 1e3)`); a session with
 an empty `ctrlLog.txt` makes that raise, park it instead. Its val metrics are teacher-forced
@@ -118,18 +118,21 @@ an empty `ctrlLog.txt` makes that raise, park it instead. Its val metrics are te
 `logs/eval_rollout.png` and on the robot. Phone side: `tflite/AutopilotMem` and the
 "Autopilot Memory" screen, model type `CMDNAV_MEM` (inputs found by name).
 
-**Dataset layout.** Only `dataset/{train,test}_data/<set>/<session>` is trained on; sessions
-not in use are parked under `dataset/_other_sessions/` in the same split structure. Current
-sets are the Autopilot Session ones: `fwdbwd_forward` (donkey_memory, records in
-`tfrecords_mem3/`) and `fwdbwd_backward` (cil_mobile_fast, cmd 2, records in `tfrecords/`).
-Both come from recordings that mix forward and backward driving, kept matched under
-`_other_sessions/fwdbwd_raw/<raw_set>/` and split with `python split_direction.py <raw_set>`
-(see its docstring). Only one of the two sets is in `train_data/test_data` at a time: training
-without `--create_tf_record` reads only the records, so a swap is needed only to rebuild a
-set's records (`python -m openbot.tfrecord_mem --mem_len 3` for forward). The indicator sets
+**Dataset layout.** The current models are the Autopilot Session pair, and their data lives
+in `dataset/fwdbwd/`, not in `train_data/test_data`: recordings go into `fwdbwd/inbox/`,
+`python split_direction.py` turns them into a numbered session
+(`raw/session_<N>/`, `{train,test}/{fwd,bwd}/session_<N>/`, random per-recording test split),
+and `python train_fwdbwd.py fwd|bwd [--sessions 1 3]` builds the records for that choice
+(`tfrecords_mem3/` fwd, `tfrecords/` bwd, each with a `manifest.txt`) and runs
+`openbot.train`. The user-facing how-to is `policy/FWDBWD.md`. `openbot.train` takes
+`--run_name` (model folder prefix; `train_fwdbwd.py` uses `fwd_s1-2-3` style names), copies
+the records' `manifest.txt` into the model folder as `data_manifest.txt`, and refuses an
+existing model folder unless `--resume`. `dataset/train_data/test_data` hold only a
+`README.txt` (it stops `openbot/__init__.py` creating `my_dataset_*` placeholders); the old
+`--create_tf_record` path still builds from them and deletes the manifest. The indicator sets
 (`indicator_training`, `indicator_data_session_2`) are another session on another track and
-`my_dataset_1/2` are older still; all are parked and not trained on. `make_forward_only.py`
-sets every cmd to 0 - never run it on indicator data. `policy/EXPERIMENTS.md` logs every dataset and trained model (models/ and
+`my_dataset_1/2` are older still; all are parked in `_other_sessions/` and not trained on.
+`make_forward_only.py` sets every cmd to 0 - never run it on indicator data. `policy/EXPERIMENTS.md` logs every dataset and trained model (models/ and
 dataset/ are gitignored); add an entry for each new run.
 
 `policy/frontend` is a separate CRA app (own `package.json`): `npm start`, `npm run build`, `npm test` inside `policy/frontend`.

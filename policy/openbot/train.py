@@ -1,7 +1,9 @@
 from dataclasses import dataclass
+import contextlib
 import inspect
 import os
 import re
+import shutil
 import threading
 import argparse
 import matplotlib.pyplot as plt
@@ -454,6 +456,16 @@ def do_training(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0):
     tr.checkpoint_path = os.path.join(models_dir, tr.model_name, "checkpoints")
     tr.log_path = os.path.join(models_dir, tr.model_name, "logs")
 
+    # Which sessions the records were built from (train_fwdbwd.py writes the manifest),
+    # so the model folder says what it was trained on.
+    if tr.train_data_dir.endswith(".tfrec"):
+        manifest = os.path.join(os.path.dirname(tr.train_data_dir), "manifest.txt")
+        if os.path.isfile(manifest):
+            os.makedirs(os.path.join(models_dir, tr.model_name), exist_ok=True)
+            shutil.copyfile(
+                manifest, os.path.join(models_dir, tr.model_name, "data_manifest.txt")
+            )
+
     tr.custom_objects = {
         "direction_metric": metrics.direction_metric,
         "angle_metric": metrics.angle_metric,
@@ -739,9 +751,14 @@ def tfrecords_path(params: Hyperparameters):
 
 
 def start_train(
-    params: Hyperparameters, callback: MyCallback, verbose=0, no_tf_record=False
+    params: Hyperparameters,
+    callback: MyCallback,
+    verbose=0,
+    no_tf_record=False,
+    run_name="openbot",
 ):
     tr = Training(params)
+    tr.dataset_name = run_name
     if no_tf_record:
         callback.broadcast("message", "Processing data...")
         tr.train_data_dir = os.path.join(dataset_dir, "train_data")
@@ -783,6 +800,14 @@ def create_tfrecord(callback: MyCallback, policy="autopilot", params=None):
     callback.broadcast(
         "message", "Converting data to tfrecord (this may take some time)..."
     )
+    # These records come from train_data/test_data, not from a session choice.
+    records = (
+        tfrecords_path(params)
+        if params is not None
+        else os.path.join(dataset_dir, "tfrecords")
+    )
+    with contextlib.suppress(FileNotFoundError):
+        os.remove(os.path.join(records, "manifest.txt"))
 
     if params is not None and params.MEM_LEN:
         out_dir = tfrecords_path(params)
@@ -936,6 +961,12 @@ if __name__ == "__main__":
         help="the type of policy to be trained (default: autopilot)",
     )
 
+    parser.add_argument(
+        "--run_name",
+        default="openbot",
+        help="start of the model folder name (default: openbot)",
+    )
+
     args = parser.parse_args()
 
     params = Hyperparameters()
@@ -999,6 +1030,11 @@ if __name__ == "__main__":
         # The architecture has no batch norm; keep the model name honest about it.
         params.BATCH_NORM = False
 
+    # Training into an existing folder mixes two runs' checkpoints and logs.
+    model_dir = os.path.join(models_dir, f"{args.run_name}_{params}")
+    if os.path.isdir(model_dir) and not args.resume:
+        parser.error(f"{model_dir} exists; rename it, or pass --resume to continue it")
+
     def broadcast(event, payload=None):
         print()
         print(event, payload)
@@ -1009,4 +1045,10 @@ if __name__ == "__main__":
     if args.create_tf_record:
         create_tfrecord(my_callback, args.policy, params)
 
-    start_train(params, my_callback, verbose=1, no_tf_record=args.no_tf_record)
+    start_train(
+        params,
+        my_callback,
+        verbose=1,
+        no_tf_record=args.no_tf_record,
+        run_name=args.run_name,
+    )
