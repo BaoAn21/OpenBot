@@ -77,6 +77,8 @@ class Hyperparameters:
     MEM_CMD: bool = False
     # Colour augmentation for a memory model. Every other model always gets it.
     COLOR_AUG: bool = False
+    # The turn-weighted autopilot loss for a memory model instead of donkeycar's mse.
+    TURN_LOSS: bool = False
 
     USE_LAST: bool = False
 
@@ -126,6 +128,8 @@ class Hyperparameters:
                 model_name += "_cmd"
             if self.COLOR_AUG:
                 model_name += "_color"
+            if self.TURN_LOSS:
+                model_name += "_turnloss"
 
         return model_name
 
@@ -537,7 +541,7 @@ def do_training(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0):
 
     callback.broadcast("model", tr.model_name)
 
-    if tr.hyperparameters.MEM_LEN:
+    if tr.hyperparameters.MEM_LEN and not tr.hyperparameters.TURN_LOSS:
         # donkeycar trains its memory model on plain mse, not the turn-weighted loss.
         tr.loss_fn = losses.mse_raw
     elif tr.hyperparameters.POLICY == "autopilot":
@@ -922,6 +926,12 @@ if __name__ == "__main__":
         "contrast on the training images, which every other model always gets",
     )
     parser.add_argument(
+        "--turn_loss",
+        action="store_true",
+        help="memory policy (--model donkey_memory): train on the turn-weighted "
+        "autopilot loss (losses.sq_weighted_mse_angle) instead of donkeycar's mse",
+    )
+    parser.add_argument(
         "--batch_size",
         type=int,
         default=128,
@@ -1016,6 +1026,11 @@ if __name__ == "__main__":
             f"--color_aug is for --model donkey_memory; {params.MODEL} always gets "
             "colour augmentation"
         )
+    if args.turn_loss and not is_mem_model:
+        parser.error(
+            f"--turn_loss is for --model donkey_memory; {params.MODEL} always uses "
+            "the turn-weighted loss"
+        )
     if is_mem_model:
         if params.SEQ_LEN > 1 or args.trim_stationary:
             parser.error(f"--model {params.MODEL} takes no stacked-frame options")
@@ -1027,6 +1042,7 @@ if __name__ == "__main__":
         params.MEM_LEN = args.mem_len or tfrecord_mem.DEFAULT_MEM_LEN
         params.MEM_CMD = args.mem_cmd
         params.COLOR_AUG = args.color_aug
+        params.TURN_LOSS = args.turn_loss
         # The architecture has no batch norm; keep the model name honest about it.
         params.BATCH_NORM = False
 

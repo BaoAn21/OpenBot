@@ -18,7 +18,7 @@ Last updated: 2026-10-25.
   (`make_forward_only.py`, commit `304689f3`).
 - **Loss history:** before 2026-10-04 the autopilot models used the older loss, which folded
   throttle into the weight (`command_weight`). From commit `e03f2c11` on they use
-  `losses.sq_weighted_mse_angle`. `donkey_memory` always uses plain MSE. **Loss values are
+  `losses.sq_weighted_mse_angle`. `donkey_memory` uses plain MSE unless trained with `--turn_loss` (`_turnloss` in the name). **Loss values are
   not comparable across these groups; compare models by their metrics.**
 
 ## Datasets

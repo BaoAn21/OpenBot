@@ -108,7 +108,7 @@ the last `--mem_len` (default 3) predicted `(steering, throttle)` pairs. `--mem_
 the indicator, wired like `cil_mobile_fast` (own 16-16 MLP fused after the Dense(100), raw
 cmd again before the heads) - fed in raw beside the 8000 flattened image features it was
 barely used. `--color_aug` opts into the colour jitter every other model always gets (they
-reject the flag). Plain MSE, no flip/cmd aug. Records live in `dataset/tfrecords_mem<N>/`,
+reject the flag). Plain MSE (`--turn_loss` switches to `sq_weighted_mse_angle`), no flip/cmd aug. Records live in `dataset/tfrecords_mem<N>/`,
 shared by runs with and without `--mem_cmd`, so rebuild them after any data change
 (`train_fwdbwd.py` does that for the fwdbwd data; `--create_tf_record` for `train_data`). That path only *reads* `matched_frame_ctrl_cmd_processed.txt` and never runs
 `associate_frames`, so freshly recorded sessions must be matched first
