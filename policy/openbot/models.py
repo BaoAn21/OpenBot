@@ -242,6 +242,61 @@ def cil_mobile_fast(img_width, img_height, bn=True, policy="autopilot"):
     return model
 
 
+def cil_mobile_fast_memory(img_width, img_height, bn=True, policy="autopilot", mem_len=3):
+    """cil_mobile_fast plus donkey_memory's memory input: the last mem_len (steering,
+    throttle) pairs, oldest first, normalized / 255 - recorded ones in training, the
+    model's own outputs when driving.
+
+    Everything else is cil_mobile_fast: the same CNN, the cmd MLP fused with the image
+    features and the raw cmd again before each later layer, and a linear output, so
+    unlike donkey_memory (sigmoid throttle) it can predict reverse. The memory branch
+    is donkey_memory's (2 * mem_len narrowing to 2) and joins at that same fusion point.
+    Inputs are (img_input, mem_input, cmd_input), the order and names donkey_memory
+    --mem_cmd has, so AutopilotMem on the phone and eval_preview take it as is.
+    """
+    if policy != "autopilot":
+        raise Exception("cil_mobile_fast_memory only supports the autopilot policy")
+
+    cnn = create_cnn(
+        img_width,
+        img_height,
+        3,
+        cnn_filters=(32, 32, 64, 64, 128),
+        kernel_sz=(5, 3, 3, 3, 2),
+        stride=(2, 2, 2, 2, 2),
+        padding="valid",
+        activation="relu",
+        conv_dropout=0.2,
+        mlp_filters=(512, 512),
+        bn=bn,
+    )
+
+    cmd_in = tf.keras.Input(shape=(1,), name="cmd_input")
+    cmd = create_mlp(1, 16, 16, name="cmd")(cmd_in)
+
+    mem_in = tf.keras.Input(shape=(2 * mem_len,), name="mem_input")
+    y = mem_in
+    for i in range(1, mem_len):
+        y = tf.keras.layers.Dense(2 * (mem_len - i), activation="relu")(y)
+        y = tf.keras.layers.Dropout(0.1)(y)
+
+    # fuse input MLP, CNN and memory
+    combinedInput = tf.keras.layers.concatenate([cmd, cnn.output, y])
+
+    # output MLP
+    x = tf.keras.layers.Dense(64, activation="relu")(combinedInput)
+    x = tf.keras.layers.concatenate([cmd_in, x])
+    x = tf.keras.layers.Dense(64, activation="relu")(x)
+    x = tf.keras.layers.concatenate([cmd_in, x])
+    x = tf.keras.layers.Dense(2, activation="linear")(x)
+
+    model = tf.keras.Model(
+        name="cil_mobile_fast_memory", inputs=(cnn.input, mem_in, cmd_in), outputs=x
+    )
+
+    return model
+
+
 def cil(img_width, img_height, bn=True, policy="autopilot"):
     if policy == "autopilot":
         mlp = create_mlp(1, 64, 64, dropout=0.5, name="cmd")
@@ -351,3 +406,65 @@ def donkey_memory(img_width, img_height, bn=False, policy="autopilot", mem_len=3
     x = tf.keras.layers.concatenate([steering, throttle])
 
     return tf.keras.Model(name="donkey_memory", inputs=inputs, outputs=x)
+
+
+def donkey_memory_reverse(
+    img_width, img_height, bn=False, policy="autopilot", mem_len=3, use_cmd=False
+):
+    """donkey_memory for driving backward: the same network, but a tanh throttle head
+    instead of the sigmoid, so throttle covers [-1, 1] and the model can reverse.
+    donkey_memory itself stays donkeycar's, unchanged.
+
+    Inputs, options and training are donkey_memory's (no batch norm, plain mse unless
+    --turn_loss, --mem_cmd / --color_aug opt-in, no flip or cmd augmentation). For the
+    Autopilot Session backward model: train_fwdbwd.py bwd --model donkey_memory_reverse.
+    """
+    if policy != "autopilot":
+        raise Exception("donkey_memory_reverse only supports the autopilot policy")
+
+    drop = 0.2
+    drop2 = 0.1
+
+    img_in = tf.keras.Input(shape=(img_height, img_width, 3), name="img_input")
+    x = img_in
+    for filters, kernel, stride in (
+        (24, 5, 2),
+        (32, 5, 2),
+        (64, 5, 2),
+        (64, 3, 1),
+        (64, 3, 1),
+    ):
+        x = tf.keras.layers.Conv2D(
+            filters, (kernel, kernel), strides=(stride, stride), activation="relu"
+        )(x)
+        x = tf.keras.layers.Dropout(drop)(x)
+    x = tf.keras.layers.Flatten()(x)
+
+    mem_in = tf.keras.Input(shape=(2 * mem_len,), name="mem_input")
+    y = mem_in
+    for i in range(1, mem_len):
+        y = tf.keras.layers.Dense(2 * (mem_len - i), activation="relu")(y)
+        y = tf.keras.layers.Dropout(drop2)(y)
+
+    x = tf.keras.layers.concatenate([x, y])
+    x = tf.keras.layers.Dense(100, activation="relu")(x)
+    x = tf.keras.layers.Dropout(drop)(x)
+
+    inputs = (img_in, mem_in)
+    if use_cmd:
+        cmd_in = tf.keras.Input(shape=(1,), name="cmd_input")
+        inputs = (img_in, mem_in, cmd_in)
+        cmd = create_mlp(1, 16, 16, name="cmd")(cmd_in)
+        x = tf.keras.layers.concatenate([cmd, x])
+
+    x = tf.keras.layers.Dense(50, activation="relu")(x)
+    x = tf.keras.layers.Dropout(drop)(x)
+    if use_cmd:
+        x = tf.keras.layers.concatenate([cmd_in, x])
+
+    steering = tf.keras.layers.Dense(1, activation="tanh", name="steering")(x)
+    # The one change from donkey_memory: tanh, not sigmoid, so throttle can go negative.
+    throttle = tf.keras.layers.Dense(1, activation="tanh", name="throttle")(x)
+    x = tf.keras.layers.concatenate([steering, throttle])
+
+    return tf.keras.Model(name="donkey_memory_reverse", inputs=inputs, outputs=x)

@@ -118,6 +118,27 @@ an empty `ctrlLog.txt` makes that raise, park it instead. Its val metrics are te
 `logs/eval_rollout.png` and on the robot. Phone side: `tflite/AutopilotMem` and the
 "Autopilot Memory" screen, model type `CMDNAV_MEM` (inputs found by name).
 
+**Reverse donkey (`--model donkey_memory_reverse`).** A separate copy of `donkey_memory` whose
+throttle head is tanh instead of sigmoid, so it can reverse; kept apart so `donkey_memory` stays
+donkeycar's. `train.DONKEY_MODELS` makes it train exactly like donkey_memory (no BN, plain MSE,
+`--mem_cmd`/`--color_aug`/`--turn_loss` opt-in, no flip). For the Autopilot Session backward
+model: `train_fwdbwd.py bwd --model donkey_memory_reverse` (bwd memory records, `--color_aug`);
+on the phone a `CMDNAV_MEM` model in the backward spinner.
+
+**cil memory model (`--model cil_mobile_fast_memory`).** cil_mobile_fast (same CNN, cmd
+MLP, raw cmd before the later layers, linear output so it can reverse) plus donkey_memory's
+memory branch fused beside the cmd MLP and image features. Unlike donkey_memory it trains like
+cil_mobile_fast: BN, colour aug, cmd and the turn-weighted loss always on (`--mem_cmd`,
+`--color_aug`, `--turn_loss` are refused), and `--flip_aug` is allowed because
+`data_augmentation.flip_sample_mem` negates the memory's steering on the same coin. Trainable
+for either Autopilot Session direction: `train_fwdbwd.py fwd|bwd --model cil_mobile_fast_memory`.
+fwd shares `tfrecords_mem<N>/` with donkey_memory; bwd builds `dataset/tfrecords_bwd_mem<N>/`
+(windows cut at gaps > 0.5 s, `split_direction.MAX_GAP_S`, as a recording's reverses share one
+folder) and passes it with `openbot.train --records_dir`. On the phone it is a `CMDNAV_MEM`
+model; `AutopilotSessionFragment` keeps a memory per direction, and both it and
+`AutopilotMemFragment` clamp throttle to >= 0 forward (<= 0 backward), since its output is
+linear. Same caveat: judge it closed loop.
+
 **Dataset layout.** The current models are the Autopilot Session pair, and their data lives
 in `dataset/fwdbwd/`, not in `train_data/test_data`: recordings go into `fwdbwd/inbox/`,
 `python split_direction.py` turns them into a numbered session
@@ -125,7 +146,9 @@ in `dataset/fwdbwd/`, not in `train_data/test_data`: recordings go into `fwdbwd/
 and `python train_fwdbwd.py fwd|bwd [--sessions 1 3]` builds the records for that choice
 (`tfrecords_mem3/` fwd, `tfrecords/` bwd, each with a `manifest.txt`) and runs
 `openbot.train`. The user-facing how-to is `policy/FWDBWD.md`. `openbot.train` takes
-`--run_name` (model folder prefix; `train_fwdbwd.py` uses `fwd_s1-2-3` style names), copies
+`--run_name` (model folder prefix; `train_fwdbwd.py` uses `fwd_s1-2-3` style names) and
+`--early_stop N` (stop after N epochs without a better val loss; off by default, `train_fwdbwd.py`
+passes 20; `best.tflite` is the best-val checkpoint either way), copies
 the records' `manifest.txt` into the model folder as `data_manifest.txt`, and refuses an
 existing model folder unless `--resume`. `dataset/train_data/test_data` hold only a
 `README.txt` (it stops `openbot/__init__.py` creating `my_dataset_*` placeholders); the old

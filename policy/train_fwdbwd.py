@@ -1,7 +1,14 @@
 """Train the forward or the backward Autopilot Session model on a choice of sessions.
 
-  fwd  donkey_memory   (--color_aug), records in dataset/tfrecords_mem<N>/
-  bwd  cil_mobile_fast (--batch_norm --flip_aug), records in dataset/tfrecords/
+  fwd  donkey_memory (--color_aug), the default, or
+       cil_mobile_fast_memory (--batch_norm --flip_aug); records in dataset/tfrecords_mem<N>/
+  bwd  cil_mobile_fast (--batch_norm --flip_aug), the default, records in dataset/tfrecords/,
+       or cil_mobile_fast_memory (--batch_norm --flip_aug) or donkey_memory_reverse
+       (--color_aug), records in dataset/tfrecords_bwd_mem<N>/
+
+Pick the model with --model; cil_mobile_fast_memory is cil_mobile_fast plus donkey_memory's
+memory of its last --mem_len (default 3) outputs, donkey_memory_reverse is donkey_memory with
+a tanh throttle so it can reverse.
 
 The sessions come from dataset/fwdbwd/{train,test}/<fwd|bwd>/session_<N>/ (see
 split_direction.py). The records are rebuilt only when the choice of sessions or their
@@ -18,6 +25,9 @@ Usage (from policy/, conda env):
     python train_fwdbwd.py --list
     python train_fwdbwd.py fwd                      # all sessions
     python train_fwdbwd.py bwd --sessions 1 3 4
+    python train_fwdbwd.py fwd --model cil_mobile_fast_memory
+    python train_fwdbwd.py bwd --model cil_mobile_fast_memory
+    python train_fwdbwd.py bwd --model donkey_memory_reverse
     python train_fwdbwd.py fwd --sessions 2 --build_only
     python train_fwdbwd.py fwd --num_epochs 60
 """
@@ -35,9 +45,17 @@ DATASET_DIR = os.path.join(POLICY_DIR, "dataset")
 ROOT = os.path.join(DATASET_DIR, "fwdbwd")
 SPLITS = (("train", "train_data", "train.tfrec"), ("test", "test_data", "test.tfrec"))
 
-TRAIN_ARGS = {
-    "fwd": ["--model", "donkey_memory", "--color_aug"],
-    "bwd": ["--model", "cil_mobile_fast", "--batch_norm", "--flip_aug"],
+# The models each direction can train, with their options; the first is the default.
+MODELS = {
+    "fwd": {
+        "donkey_memory": ["--color_aug"],
+        "cil_mobile_fast_memory": ["--batch_norm", "--flip_aug"],
+    },
+    "bwd": {
+        "cil_mobile_fast": ["--batch_norm", "--flip_aug"],
+        "cil_mobile_fast_memory": ["--batch_norm", "--flip_aug"],
+        "donkey_memory_reverse": ["--color_aug"],
+    },
 }
 COMMON_ARGS = [
     "--batch_size",
@@ -46,6 +64,8 @@ COMMON_ARGS = [
     "0.0003",
     "--num_epochs",
     "100",
+    "--early_stop",
+    "20",
 ]
 
 
@@ -66,7 +86,8 @@ def folders(root, split, direction, number):
 
 
 def manifest(root, direction, numbers, mem_len):
-    lines = [f"# {direction}" + (f", mem_len {mem_len}" if direction == "fwd" else "")]
+    """mem_len is 0 for the plain backward records."""
+    lines = [f"# {direction}" + (f", mem_len {mem_len}" if mem_len else "")]
     for split, _, _ in SPLITS:
         for n in numbers:
             lines += [
@@ -148,18 +169,42 @@ def staged(root, direction, numbers):
         os.rmdir(stage)
 
 
-def build_fwd(stage, out_dir, mem_len):
+def build_fwd(stage, out_dir, mem_len, max_gap_s=None):
     from openbot import tfrecord_mem
 
     for _, data_dir, name in SPLITS:
         tfrecord_mem.convert_dataset(
-            os.path.join(stage, data_dir), out_dir, name, mem_len, verbose=False
+            os.path.join(stage, data_dir),
+            out_dir,
+            name,
+            mem_len,
+            verbose=False,
+            max_gap_s=max_gap_s,
         )
 
 
-def build_bwd(stage, out_dir):
+def check_bwd(path):
+    """The backward model is fed cmd 2 and must never learn forward throttle, nor
+    remember any."""
     import tensorflow as tf
 
+    count = bad = 0
+    for raw in tf.data.TFRecordDataset(path):
+        f = tf.train.Example.FromString(raw.numpy()).features.feature
+        count += 1
+        # Memory records only: (steering, throttle) pairs, so every odd entry.
+        past_throttles = list(f["mem"].float_list.value)[1::2] if "mem" in f else []
+        bad += (
+            f["cmd"].float_list.value[0] != 2
+            or f["right"].float_list.value[0] >= 0
+            or any(t >= 0 for t in past_throttles)
+        )
+    print(f"{path}: {count} examples")
+    if bad:
+        raise SystemExit(f"{path}: {bad} examples without cmd 2 and throttle < 0")
+
+
+def build_bwd(stage, out_dir):
     from openbot import tfrecord
 
     for _, data_dir, name in SPLITS:
@@ -172,22 +217,28 @@ def build_bwd(stage, out_dir):
         missing = log.getvalue().count("cannot be found")
         if missing:
             raise SystemExit(f"{data_dir}: {missing} images not found")
-        # The backward model is fed cmd 2 and must never learn forward throttle.
-        count = bad = 0
-        for raw in tf.data.TFRecordDataset(os.path.join(out_dir, name)):
-            f = tf.train.Example.FromString(raw.numpy()).features.feature
-            count += 1
-            bad += (
-                f["cmd"].float_list.value[0] != 2 or f["right"].float_list.value[0] >= 0
-            )
-        print(f"{out_dir}/{name}: {count} examples")
-        if bad:
-            raise SystemExit(f"{name}: {bad} examples without cmd 2 and throttle < 0")
+        check_bwd(os.path.join(out_dir, name))
+
+
+def build_bwd_mem(stage, out_dir, mem_len):
+    from split_direction import MAX_GAP_S
+
+    # A recording's backward frames share one folder, reverse after reverse, so cut the
+    # memory where split_direction cuts the forward runs: no memory from the previous
+    # reverse, just as the phone clears it on every switch.
+    build_fwd(stage, out_dir, mem_len, max_gap_s=MAX_GAP_S)
+    for _, _, name in SPLITS:
+        check_bwd(os.path.join(out_dir, name))
 
 
 def records_dir(dataset_dir, direction, mem_len):
+    """mem_len is 0 for the plain backward records."""
     if direction == "fwd":
         return os.path.join(dataset_dir, f"tfrecords_mem{mem_len}")
+    if mem_len:
+        # Apart from the forward memory records, so switching direction never
+        # rebuilds (or trains on) the other one's.
+        return os.path.join(dataset_dir, f"tfrecords_bwd_mem{mem_len}")
     return os.path.join(dataset_dir, "tfrecords")
 
 
@@ -204,7 +255,15 @@ def main():
         "--sessions", type=int, nargs="+", help="session numbers (default: all)"
     )
     parser.add_argument(
-        "--mem_len", type=int, default=3, help="fwd memory length (default 3)"
+        "--model",
+        help="fwd: donkey_memory (default) or cil_mobile_fast_memory; "
+        "bwd: cil_mobile_fast (default), cil_mobile_fast_memory or donkey_memory_reverse",
+    )
+    parser.add_argument(
+        "--mem_len",
+        type=int,
+        default=3,
+        help="memory length of a memory model (default 3)",
     )
     parser.add_argument(
         "--build_only", action="store_true", help="build the records, don't train"
@@ -223,6 +282,10 @@ def main():
     if args.direction is None:
         parser.error("give fwd or bwd (or --list)")
     direction = args.direction
+    model = args.model or next(iter(MODELS[direction]))
+    if model not in MODELS[direction]:
+        parser.error(f"{direction} trains {' or '.join(MODELS[direction])}, not {model}")
+    mem_len = args.mem_len if "memory" in model else 0
 
     available = sessions_in(root, direction)
     numbers = sorted(set(args.sessions)) if args.sessions else available
@@ -237,8 +300,8 @@ def main():
     if empty_test:
         print(f"note: sessions {empty_test} have no {direction} test data")
 
-    out_dir = records_dir(dataset_dir, direction, args.mem_len)
-    wanted = manifest(root, direction, numbers, args.mem_len)
+    out_dir = records_dir(dataset_dir, direction, mem_len)
+    wanted = manifest(root, direction, numbers, mem_len)
     manifest_path = os.path.join(out_dir, "manifest.txt")
     have = open(manifest_path).read() if os.path.isfile(manifest_path) else None
     if args.rebuild or have != wanted:
@@ -247,7 +310,9 @@ def main():
             os.remove(manifest_path)  # half-built records must never look current
         with staged(root, direction, numbers) as stage:
             if direction == "fwd":
-                build_fwd(stage, out_dir, args.mem_len)
+                build_fwd(stage, out_dir, mem_len)
+            elif mem_len:
+                build_bwd_mem(stage, out_dir, mem_len)
             else:
                 build_bwd(stage, out_dir)
         with open(manifest_path, "w") as f:
@@ -259,9 +324,11 @@ def main():
 
     run_name = f"{direction}_s" + "-".join(str(n) for n in numbers)
     cmd = [sys.executable, "-m", "openbot.train", "--run_name", run_name]
-    cmd += TRAIN_ARGS[direction] + COMMON_ARGS
-    if direction == "fwd":
-        cmd += ["--mem_len", str(args.mem_len)]
+    cmd += ["--model", model] + MODELS[direction][model] + COMMON_ARGS
+    if mem_len:
+        cmd += ["--mem_len", str(mem_len)]
+    if direction == "bwd" and mem_len:
+        cmd += ["--records_dir", out_dir]
     cmd += train_extra  # later options win in argparse
     print(" ".join(cmd[1:]))
     # openbot.train copies manifest.txt into the model folder as data_manifest.txt.

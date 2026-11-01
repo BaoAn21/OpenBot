@@ -12,6 +12,8 @@ Like donkeycar, which only records while the throttle is non-zero, the rows come
 from the processed labels with the stationary frames already removed, so a window
 runs straight across a stop. Also like donkeycar, a frame without a full history
 behind it (the first mem_len rows of each session) is dropped rather than padded.
+With max_gap_s a session is first cut wherever two rows are further apart than that,
+and each piece is windowed on its own, so no memory reaches across a pause.
 
 Usage:
     python -m openbot.tfrecord_mem --mem_len 3
@@ -25,6 +27,7 @@ import tensorflow as tf
 from . import dataset_dir, utils
 from .tfrecord_seq import (
     IMAGE_SUFFIX,
+    PROCESSED_FILE_NAME,
     _bytes_feature,
     _float_feature,
     _raw_bytes_feature,
@@ -42,6 +45,33 @@ def tfrecords_dir_name(mem_len):
 def build_windows(rows, mem_len):
     """(label_row, history_rows) for every row with mem_len rows before it."""
     return [(rows[k], rows[k - mem_len : k]) for k in range(mem_len, len(rows))]
+
+
+def read_timestamps(session_dir):
+    """Frame id -> timestamp (ns), from the same processed labels as the rows."""
+    stamps = {}
+    with open(os.path.join(session_dir, "sensor_data", PROCESSED_FILE_NAME)) as f:
+        f.readline()  # discard header
+        for line in f:
+            fields = line.strip().split(",")
+            if len(fields) < 2:
+                continue
+            basename = os.path.basename(fields[1].replace("\\", "/"))
+            stamps[int(basename.split("_")[0])] = int(fields[0])
+    return stamps
+
+
+def split_at_gaps(rows, timestamps, max_gap_s):
+    """rows cut into runs wherever consecutive rows are more than max_gap_s apart."""
+    runs, current = [], []
+    for row in rows:
+        if current and (timestamps[row[0]] - timestamps[current[-1][0]]) / 1e9 > max_gap_s:
+            runs.append(current)
+            current = []
+        current.append(row)
+    if current:
+        runs.append(current)
+    return runs
 
 
 def make_example(session_dir, label_row, history_rows):
@@ -67,8 +97,11 @@ def make_example(session_dir, label_row, history_rows):
     return tf.train.Example(features=tf.train.Features(feature=feature))
 
 
-def convert_dataset(data_dir, tfrecords_dir, tfrecords_name, mem_len, verbose=True):
-    """Write one tfrecord covering every session under data_dir."""
+def convert_dataset(
+    data_dir, tfrecords_dir, tfrecords_name, mem_len, verbose=True, max_gap_s=None
+):
+    """Write one tfrecord covering every session under data_dir. max_gap_s (seconds)
+    cuts the windows at pauses, see the module docstring; None windows across them."""
     os.makedirs(tfrecords_dir, exist_ok=True)
     out_path = os.path.join(tfrecords_dir, tfrecords_name)
 
@@ -81,7 +114,15 @@ def convert_dataset(data_dir, tfrecords_dir, tfrecords_name, mem_len, verbose=Tr
                 rows = [
                     r for r in read_processed_labels(session_dir) if r[0] in available
                 ]
-                windows = build_windows(rows, mem_len)
+                if max_gap_s is None:
+                    windows = build_windows(rows, mem_len)
+                else:
+                    timestamps = read_timestamps(session_dir)
+                    windows = [
+                        window
+                        for run in split_at_gaps(rows, timestamps, max_gap_s)
+                        for window in build_windows(run, mem_len)
+                    ]
                 if not windows:
                     print(f"  skipping {dataset}/{session}: no usable labels")
                     continue

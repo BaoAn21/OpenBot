@@ -2,8 +2,14 @@
 
 How to go from new recordings to the two Autopilot Session models:
 
-- **fwd**: `donkey_memory`, drives forward (model type CMDNAV_MEM on the phone)
-- **bwd**: `cil_mobile_fast`, drives backward (model type CMDNAV, gets cmd 2)
+- **fwd**: `donkey_memory` (default) or `cil_mobile_fast_memory`, drives forward (model
+  type CMDNAV_MEM on the phone)
+- **bwd**: `cil_mobile_fast` (default), drives backward (model type CMDNAV, gets cmd 2), or
+  `cil_mobile_fast_memory` or `donkey_memory_reverse` (model type CMDNAV_MEM)
+
+`cil_mobile_fast_memory` is cil_mobile_fast plus donkey_memory's memory of its last 3
+outputs. `donkey_memory_reverse` is donkey_memory with a tanh throttle instead of the
+sigmoid, so it can reverse (plain donkey_memory can't). Pick either with `--model`.
 
 Everything runs from `policy/` in the conda env:
 
@@ -44,6 +50,9 @@ python split_direction.py --note "what this batch is"     # makes a new session
 python train_fwdbwd.py --list                        # what each session holds
 python train_fwdbwd.py fwd                           # forward model, all sessions
 python train_fwdbwd.py bwd                           # backward model, all sessions
+python train_fwdbwd.py fwd --model cil_mobile_fast_memory   # forward, cil with memory
+python train_fwdbwd.py bwd --model cil_mobile_fast_memory   # backward, cil with memory
+python train_fwdbwd.py bwd --model donkey_memory_reverse    # backward, donkey with memory
 python train_fwdbwd.py fwd --sessions 1 3 4          # only these sessions
 python train_fwdbwd.py bwd --sessions 1 3 --num_epochs 60   # other options go to openbot.train
 ```
@@ -51,8 +60,15 @@ python train_fwdbwd.py bwd --sessions 1 3 --num_epochs 60   # other options go t
 - It builds the training records for your choice of sessions first. They are only rebuilt
   when the choice or the data changes, so a second run starts training right away.
   `--build_only` builds without training.
-- Settings used: fwd `--model donkey_memory --color_aug`, bwd `--model cil_mobile_fast
-  --batch_norm --flip_aug`, both `--batch_size 128 --learning_rate 0.0003 --num_epochs 100`.
+- Settings used: `donkey_memory --color_aug --mem_len 3`, `cil_mobile_fast --batch_norm
+  --flip_aug`, `cil_mobile_fast_memory --batch_norm --flip_aug --mem_len 3`,
+  `donkey_memory_reverse --color_aug --mem_len 3`, all
+  `--batch_size 128 --learning_rate 0.0003 --num_epochs 100 --early_stop 20`.
+- Training stops once val loss hasn't improved for 20 epochs (`--early_stop 20`), so
+  100 epochs is only the upper limit. `best.tflite` is the best-val checkpoint either way.
+  `--early_stop 0` trains all epochs; `--early_stop 30` waits longer (the cil models'
+  val loss is noisier).
+  The flip mirrors the memory too (its steering negated), so it stays consistent.
 - The model lands in `models/<fwd|bwd>_s<sessions>_<settings>/`, for example
   `models/fwd_s1-2-3_donkey_memory_lr0.0003_bz128_mem3_color/`, with a
   `data_manifest.txt` listing every data folder it was trained on.
@@ -63,8 +79,13 @@ python train_fwdbwd.py bwd --sessions 1 3 --num_epochs 60   # other options go t
 
 ## 5. Check and use the model
 
-- **fwd**: judge it by `logs/eval_rollout.png` (closed loop) and on the robot. Its val
-  numbers use the recorded memory and look better than it drives.
+- **Memory models** (donkey_memory, donkey_memory_reverse, cil_mobile_fast_memory): judge them by `logs/eval_rollout.png` (closed loop) and on
+  the robot. Their val numbers use the recorded memory and look better than they drive, so
+  don't compare them with the plain bwd model's. Don't compare loss values between
+  donkey_memory (mse) and cil_mobile_fast_memory (turn-weighted loss) either.
+- On the phone, cil_mobile_fast_memory and donkey_memory_reverse are added as CMDNAV_MEM; the
+  Autopilot Session backward spinner offers CMDNAV and CMDNAV_MEM models. The phone clamps
+  throttle to >= 0 forward and <= 0 backward.
 - Put `checkpoints/best.tflite` on the phone (the checkpoint with the best val loss).
 - Note the run in `policy/EXPERIMENTS.md`: sessions, metrics, robot result.
 
@@ -83,6 +104,7 @@ dataset/fwdbwd/
   parked/empty/, parked/autopilot/
 dataset/tfrecords_mem3/           fwd records + manifest.txt (what they hold)
 dataset/tfrecords/                bwd records + manifest.txt
+dataset/tfrecords_bwd_mem3/       bwd memory model records + manifest.txt
 ```
 
 How the split works:
@@ -93,4 +115,6 @@ How the split works:
 - Backward: all throttle < 0 frames of a recording in one folder, cmd set to 2, because
   that is what the phone gives the backward model.
 - Stopped frames (throttle 0) go to neither.
+- The bwd memory records cut the memory where two backward frames are over 0.5 s
+  apart, so a reverse never remembers the previous one (the phone clears it on a switch).
 - Images are hard links to the raw recording, so splitting costs no disk space.

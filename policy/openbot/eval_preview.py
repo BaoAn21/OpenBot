@@ -8,7 +8,7 @@ Writes two figures:
   eval_scatter.png - predicted vs. true steering and throttle over the whole test
                      set, with MAE and the same accuracy thresholds as metrics.py
 
-and, for a memory model (donkey_memory), a third:
+and, for a memory model (donkey_memory, cil_mobile_fast_memory), a third:
   eval_rollout.png - each test session replayed in order with the model fed its own
                      previous predictions as memory, the way it drives, next to the
                      teacher-forced prediction that gets the recorded memory
@@ -367,6 +367,11 @@ def default_tfrec_path(model_dir):
     mem = re.search(r"_mem(\d+)", os.path.basename(model_dir))
     if mem is not None:
         records_dir = tfrecord_mem.tfrecords_dir_name(int(mem[1]))
+        # train_fwdbwd.py keeps the backward memory records apart; the manifest it
+        # copies into the model folder starts with "# bwd" for those.
+        manifest = os.path.join(model_dir, "data_manifest.txt")
+        if os.path.isfile(manifest) and open(manifest).readline().startswith("# bwd"):
+            records_dir = "tfrecords_bwd_mem" + mem[1]
         return os.path.join(dataset_dir, records_dir, "test.tfrec")
 
     m = re.search(r"_seq(\d+(?:-\d+)*)(?:_trim(\d+))?", os.path.basename(model_dir))

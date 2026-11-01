@@ -78,12 +78,12 @@ def logger_cb(log_path, append=False):
     return logger_callback
 
 
-def early_stopping_cb():
+def early_stopping_cb(patience=20):
     early_stopping_callback = tf.keras.callbacks.EarlyStopping(
         monitor="val_loss",
         min_delta=0,
-        patience=20,
-        verbose=0,
+        patience=patience,
+        verbose=1,  # prints "Epoch N: early stopping"
         mode="auto",
         baseline=None,
         restore_best_weights=False,

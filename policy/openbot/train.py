@@ -43,6 +43,9 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
+# donkeycar's memory model and its reverse twin train the same way.
+DONKEY_MODELS = ("donkey_memory", "donkey_memory_reverse")
+
 if tf.test.gpu_device_name():
     print("Default GPU Device:{}".format(tf.test.gpu_device_name()))
 else:
@@ -58,6 +61,8 @@ class Hyperparameters:
     TEST_BATCH_SIZE: int = 16
     LEARNING_RATE: float = 0.0003
     NUM_EPOCHS: int = 100
+    # Stop after this many epochs without a better val loss; 0 trains all NUM_EPOCHS.
+    EARLY_STOP: int = 0
 
     BATCH_NORM: bool = True
     IS_CROP: bool = False
@@ -71,14 +76,21 @@ class Hyperparameters:
     TRIM_STATIONARY: bool = False
     KEEP_STATIONARY: int = tfrecord_seq.DEFAULT_KEEP_STATIONARY
 
-    # Previous controls fed back to a memory model (donkey_memory); 0 means none.
+    # Previous controls fed back to a memory model (donkey_memory,
+    # cil_mobile_fast_memory); 0 means none.
     MEM_LEN: int = 0
+    # The next three are donkey_memory options; cil_mobile_fast_memory always has them
+    # on, as cil_mobile_fast does.
     # Current-frame indicator fed into a memory model alongside the memory input.
     MEM_CMD: bool = False
     # Colour augmentation for a memory model. Every other model always gets it.
     COLOR_AUG: bool = False
     # The turn-weighted autopilot loss for a memory model instead of donkeycar's mse.
     TURN_LOSS: bool = False
+
+    # Records directory, absolute or relative to dataset/; empty means the default
+    # for the configuration (tfrecords_path).
+    RECORDS_DIR: str = ""
 
     USE_LAST: bool = False
 
@@ -124,6 +136,7 @@ class Hyperparameters:
                 model_name += f"_trim{self.KEEP_STATIONARY}"
         if self.MEM_LEN:
             model_name += f"_mem{self.MEM_LEN}"
+        if self.MODEL in DONKEY_MODELS:
             if self.MEM_CMD:
                 model_name += "_cmd"
             if self.COLOR_AUG:
@@ -257,14 +270,23 @@ def load_tfrecord(tr: Training, verbose=0):
         if mem_len:
             # donkeycar's memory model: the previous controls take the place of the
             # cmd input, and its default config applies no augmentation at all.
-            # --color_aug opts into the same colour jitter the other models get;
-            # flipping stays out, it would contradict the recorded memory.
+            # --color_aug opts into the same colour jitter the other models get.
+            # cil_mobile_fast_memory always gets it and may flip (FLIP_AUG and CMD_AUG
+            # are refused for donkey_memory), with the memory mirrored too.
+            mem = features["mem"]
+            cmd_input = features["cmd"]
+            label = [features["left"], features["right"]]
             if tr.hyperparameters.COLOR_AUG:
                 image = data_augmentation.augment_img(image)
-            label = [features["left"], features["right"]]
+            if tr.hyperparameters.FLIP_AUG:
+                image, cmd_input, mem, label = data_augmentation.flip_sample_mem(
+                    image, cmd_input, mem, label
+                )
+            if tr.hyperparameters.CMD_AUG:
+                cmd_input = data_augmentation.augment_cmd(cmd_input)
             if tr.hyperparameters.MEM_CMD:
-                return (image, features["mem"], features["cmd"]), label
-            return (image, features["mem"]), label
+                return (image, mem, cmd_input), label
+            return (image, mem), label
 
         if tr.hyperparameters.POLICY == "autopilot":
             cmd_input = features["cmd"]
@@ -332,7 +354,7 @@ def load_tfrecord(tr: Training, verbose=0):
 
     # Obtains the images shapes of records from .tfrecords.
     # Everything after the image: cmd, the goal, the memory, or the memory then cmd
-    # (donkey_memory with --mem_cmd).
+    # (donkey_memory with --mem_cmd, cil_mobile_fast_memory).
     for (image, *command_inputs), label in train_dataset.take(1):
         shape = image.numpy().shape
         tr.NETWORK_IMG_HEIGHT = shape[0]
@@ -577,6 +599,8 @@ def do_training(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0):
         callbacks.logger_cb(tr.log_path, resume_training),
         callback,
     ]
+    if tr.hyperparameters.EARLY_STOP:
+        callback_list.append(callbacks.early_stopping_cb(tr.hyperparameters.EARLY_STOP))
 
     if tr.hyperparameters.WANDB:
         callback_list += [WandbCallback()]
@@ -600,7 +624,10 @@ def do_training(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0):
 def do_evaluation(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0):
     callback.broadcast("message", "Generate plots...")
 
-    x = np.arange(tr.INITIAL_EPOCH + 1, tr.history.params["epochs"] + 1, 1)
+    # The epochs that actually ran: fewer than NUM_EPOCHS after an early stop.
+    x = np.arange(
+        tr.INITIAL_EPOCH + 1, tr.INITIAL_EPOCH + len(tr.history.history["loss"]) + 1
+    )
 
     plt.figure().gca().xaxis.get_major_locator().set_params(integer=True)
     plt.plot(x, tr.history.history["loss"], label="loss")
@@ -742,6 +769,8 @@ def tfrecords_path(params: Hyperparameters):
     shape, so changing seq_len, seq_stride or mem_len can never silently reuse records
     built for a different one.
     """
+    if params.RECORDS_DIR:
+        return os.path.join(dataset_dir, params.RECORDS_DIR)
     if params.MEM_LEN:
         return os.path.join(dataset_dir, tfrecord_mem.tfrecords_dir_name(params.MEM_LEN))
     if params.SEQ_LEN > 1:
@@ -776,7 +805,9 @@ def start_train(
         tr.train_data_dir = os.path.join(records_dir, "train.tfrec")
         tr.test_data_dir = os.path.join(records_dir, "test.tfrec")
         if not os.path.isfile(tr.train_data_dir):
-            if params.MEM_LEN:
+            if params.RECORDS_DIR:
+                hint = "check --records_dir"
+            elif params.MEM_LEN:
                 hint = f"python -m openbot.tfrecord_mem --mem_len {params.MEM_LEN}"
             elif params.SEQ_LEN > 1:
                 hint = f"python -m openbot.tfrecord_seq --seq_offsets {params.SEQ_OFFSETS}"
@@ -869,6 +900,8 @@ if __name__ == "__main__":
             "pilot_net",
             "pilot_net_seq",
             "donkey_memory",
+            "donkey_memory_reverse",
+            "cil_mobile_fast_memory",
         ],
         help="network architecture (default: pilot_net)",
     )
@@ -910,26 +943,34 @@ if __name__ == "__main__":
         "--mem_len",
         type=int,
         default=None,
-        help="memory policy (--model donkey_memory): number of previous controls "
-        f"fed back to the model (default: {tfrecord_mem.DEFAULT_MEM_LEN})",
+        help="memory policy (the donkey_memory models or cil_mobile_fast_memory): number "
+        "of previous controls fed back to the model "
+        f"(default: {tfrecord_mem.DEFAULT_MEM_LEN})",
     )
     parser.add_argument(
         "--mem_cmd",
         action="store_true",
-        help="memory policy (--model donkey_memory): also feed the current-frame "
+        help="memory policy (the donkey_memory models): also feed the current-frame "
         "indicator (cmd) into the model",
     )
     parser.add_argument(
         "--color_aug",
         action="store_true",
-        help="memory policy (--model donkey_memory): random hue/saturation/brightness/"
+        help="memory policy (the donkey_memory models): random hue/saturation/brightness/"
         "contrast on the training images, which every other model always gets",
     )
     parser.add_argument(
         "--turn_loss",
         action="store_true",
-        help="memory policy (--model donkey_memory): train on the turn-weighted "
+        help="memory policy (the donkey_memory models): train on the turn-weighted "
         "autopilot loss (losses.sq_weighted_mse_angle) instead of donkeycar's mse",
+    )
+    parser.add_argument(
+        "--records_dir",
+        default=None,
+        help="read the tfrecords from this directory (absolute or relative to "
+        "dataset/) instead of the default for the configuration; train_fwdbwd.py "
+        "uses it for the backward memory records",
     )
     parser.add_argument(
         "--batch_size",
@@ -945,6 +986,13 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--num_epochs", type=int, default=100, help="number of epochs (default: 100)"
+    )
+    parser.add_argument(
+        "--early_stop",
+        type=int,
+        default=0,
+        help="stop after this many epochs without a better val loss "
+        "(0 = off, train all --num_epochs)",
     )
     parser.add_argument("--batch_norm", action="store_true", help="use batch norm")
     parser.add_argument(
@@ -986,6 +1034,7 @@ if __name__ == "__main__":
     params.TEST_BATCH_SIZE = args.batch_size
     params.LEARNING_RATE = args.learning_rate
     params.NUM_EPOCHS = args.num_epochs
+    params.EARLY_STOP = args.early_stop
     params.BATCH_NORM = args.batch_norm
     params.FLIP_AUG = args.flip_aug
     params.CMD_AUG = args.cmd_aug
@@ -1017,34 +1066,54 @@ if __name__ == "__main__":
     is_mem_model = (
         "mem_len" in inspect.signature(getattr(models, params.MODEL)).parameters
     )
+    is_donkey = params.MODEL in DONKEY_MODELS
     if args.mem_len is not None and not is_mem_model:
-        parser.error(f"--mem_len needs --model donkey_memory, not {params.MODEL}")
-    if args.mem_cmd and not is_mem_model:
-        parser.error(f"--mem_cmd needs --model donkey_memory, not {params.MODEL}")
-    if args.color_aug and not is_mem_model:
         parser.error(
-            f"--color_aug is for --model donkey_memory; {params.MODEL} always gets "
+            "--mem_len needs a memory model (donkey_memory, donkey_memory_reverse, "
+            "cil_mobile_fast_memory), "
+            f"not {params.MODEL}"
+        )
+    if args.mem_cmd and not is_donkey:
+        parser.error(
+            f"--mem_cmd is for the donkey_memory models, not {params.MODEL}"
+            + (" (it always has a cmd input)" if is_mem_model else "")
+        )
+    if args.color_aug and not is_donkey:
+        parser.error(
+            f"--color_aug is for the donkey_memory models; {params.MODEL} always gets "
             "colour augmentation"
         )
-    if args.turn_loss and not is_mem_model:
+    if args.turn_loss and not is_donkey:
         parser.error(
-            f"--turn_loss is for --model donkey_memory; {params.MODEL} always uses "
+            f"--turn_loss is for the donkey_memory models; {params.MODEL} always uses "
             "the turn-weighted loss"
         )
     if is_mem_model:
         if params.SEQ_LEN > 1 or args.trim_stationary:
             parser.error(f"--model {params.MODEL} takes no stacked-frame options")
-        if args.flip_aug or args.cmd_aug or args.policy != "autopilot":
-            parser.error(
-                f"--model {params.MODEL} is donkeycar's memory model as is: autopilot "
-                "only, no --flip_aug or --cmd_aug"
-            )
+        if args.policy != "autopilot":
+            parser.error(f"--model {params.MODEL} is autopilot only")
         params.MEM_LEN = args.mem_len or tfrecord_mem.DEFAULT_MEM_LEN
+    if is_donkey:
+        if args.flip_aug or args.cmd_aug:
+            parser.error(
+                f"--model {params.MODEL} is donkeycar's memory model as is: no "
+                "--flip_aug or --cmd_aug"
+            )
         params.MEM_CMD = args.mem_cmd
         params.COLOR_AUG = args.color_aug
         params.TURN_LOSS = args.turn_loss
         # The architecture has no batch norm; keep the model name honest about it.
         params.BATCH_NORM = False
+    elif is_mem_model:
+        # cil_mobile_fast_memory trains like cil_mobile_fast: cmd input, colour
+        # augmentation and the turn-weighted loss, always.
+        params.MEM_CMD = params.COLOR_AUG = params.TURN_LOSS = True
+
+    if args.records_dir:
+        if args.create_tf_record or args.no_tf_record:
+            parser.error("--records_dir reads existing records; build them separately")
+        params.RECORDS_DIR = args.records_dir
 
     # Training into an existing folder mixes two runs' checkpoints and logs.
     model_dir = os.path.join(models_dir, f"{args.run_name}_{params}")

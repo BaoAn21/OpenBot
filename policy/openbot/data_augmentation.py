@@ -101,3 +101,26 @@ def flip_sample(img, cmd, label):
         lambda: tf.stack([label[0], label[1]]),
     )
     return img, cmd, label
+
+
+def flip_sample_mem(img, cmd, mem, label):
+    """
+    flip_sample for a memory model's sample, with its memory
+    [s(t-N), t(t-N), ..., s(t-1), t(t-1)] mirrored on the same coin: every steering
+    negated, the throttles left as they are, as in the label. Flipping the image but
+    not the memory would pair a left turn with a memory of turning right.
+    """
+    do_flip = tf.random.uniform([]) < 0.5
+    img = tf.cond(do_flip, lambda: tf.image.flip_left_right(img), lambda: img)
+    flipped_cmd = tf.where(tf.equal(tf.abs(cmd), 1.0), -cmd, cmd)
+    cmd = tf.cond(do_flip, lambda: flipped_cmd, lambda: cmd)
+    # Even entries are steering, odd ones throttle. A constant, so mem keeps its
+    # static shape.
+    sign = tf.constant([-1.0, 1.0] * (mem.shape[0] // 2))
+    mem = tf.cond(do_flip, lambda: mem * sign, lambda: mem)
+    label = tf.cond(
+        do_flip,
+        lambda: tf.stack([-label[0], label[1]]),
+        lambda: tf.stack([label[0], label[1]]),
+    )
+    return img, cmd, mem, label
