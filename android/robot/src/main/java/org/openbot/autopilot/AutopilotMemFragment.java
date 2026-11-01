@@ -550,9 +550,12 @@ public class AutopilotMemFragment extends CameraFragment {
                             final long startTime = SystemClock.elapsedRealtime();
                             final Control output =
                                     autopilot.recognizeImage(croppedBitmap, memory, vehicle.getIndicator());
-                            pushMemory(output);
+                            // Forward only: cil_mobile_fast_memory's linear throttle can go negative.
+                            final Control forward =
+                                    new Control(output.getSteering(), Math.max(output.getThrottle(), 0));
+                            pushMemory(forward);
                             showMemory(memory.clone());
-                            handleDriveCommand(output);
+                            handleDriveCommand(forward);
                             lastProcessingTimeMs = SystemClock.elapsedRealtime() - startTime;
                         }
 

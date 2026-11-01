@@ -48,9 +48,9 @@ import timber.log.Timber;
 
 /**
  * A full autopilot run on a track that has to be driven both ways: one model drives forward
- * (donkeycar's memory policy, {@code CMDNAV_MEM}) and another backward ({@code CMDNAV}, e.g.
- * cil_mobile_fast). Both are loaded up front so a switch is instant, but only the active one runs
- * on a frame.
+ * (a memory model, {@code CMDNAV_MEM}: donkey_memory or cil_mobile_fast_memory) and another backward ({@code CMDNAV}, e.g.
+ * cil_mobile_fast, or {@code CMDNAV_MEM}, e.g. cil_mobile_fast_memory). Both are loaded up front so
+ * a switch is instant, but only the active one runs on a frame.
  *
  * <p>Which one drives follows the indicator: REVERSE means backward, anything else forward. The
  * on-screen button, the gamepad's triangle and the phone/web controllers all switch it that way,
@@ -59,17 +59,20 @@ import timber.log.Timber;
  * in as an {@link IndicatorSource} and sets the indicator the same way.
  *
  * <p>On every switch the car stops for {@link #SWITCH_PAUSE_MS} before the other model takes over,
- * and the forward model's memory is cleared, so it starts from the standstill it starts from in
- * training. Backward throttle is clamped to <= 0: cil_mobile_fast's output is linear, and with the
- * ESC in F/R mode a small positive throttle would drive forward in the middle of a reverse. The
- * switch decides the direction, the model only how much.
+ * and the memories are cleared, so a memory model starts from the standstill it starts from in
+ * training. Throttle is clamped to >= 0 forward and <= 0 backward: the cil models' output is
+ * linear, and with the ESC in F/R mode a small throttle of the wrong sign would change direction
+ * in the middle of a run. The switch decides the direction, the model only how much. A memory
+ * model remembers the clamped output, what the car did, as its training data recorded it.
  *
  * <p>Moving the gamepad stick while autopilot is on takes over: you drive, the models don't run,
- * and the forward model's memory follows what the car does. Once the stick has been centred for
+ * and the active direction's memory follows what the car does. Once the stick has been centred for
  * {@link #TAKEOVER_RELEASE_MS} the models drive again.
  *
- * <p>The forward spinner only offers CMDNAV_MEM models and the backward one only CMDNAV models:
- * donkey_memory's sigmoid throttle can never reverse, so it would silently drive forward there.
+ * <p>The forward spinner only offers CMDNAV_MEM models, the backward one CMDNAV and CMDNAV_MEM
+ * models. Forward needs the memory input; backward needs a model that can reverse - a donkey_memory
+ * model there would only stand still, its sigmoid throttle clamped to 0; use donkey_memory_reverse
+ * (tanh throttle) instead.
  */
 public class AutopilotSessionFragment extends CameraFragment {
 
@@ -97,7 +100,8 @@ public class AutopilotSessionFragment extends CameraFragment {
     private IndicatorSource autoIndicator = null;
 
     private AutopilotMem forwardNet;
-    private Autopilot backwardNet;
+    /** An {@link Autopilot} (CMDNAV) or an {@link AutopilotMem} (CMDNAV_MEM). */
+    private Network backwardNet;
     private Crop forwardCrop;
     private Crop backwardCrop;
 
@@ -105,10 +109,18 @@ public class AutopilotSessionFragment extends CameraFragment {
      * The forward model's previous outputs, {@code [s, t] * memLen} oldest first, as in {@link
      * AutopilotMemFragment}. Only touched on the inference thread.
      */
-    private float[] memory;
+    private float[] forwardMemory;
 
-    /** The memory as last put on screen; the overlay redraws from it on indicator changes. */
-    private volatile String memoryText = "";
+    /** The same for a backward memory model; null for a CMDNAV one. */
+    private float[] backwardMemory;
+
+    /**
+     * The memories as last put on screen ("" for a backward model without one); the overlay redraws
+     * from them on indicator changes.
+     */
+    private volatile String forwardMemoryText = "";
+
+    private volatile String backwardMemoryText = "";
 
     /** Direction of the last inferred frame and end of the stop after a switch. Inference thread. */
     private boolean lastReverse = false;
@@ -178,7 +190,7 @@ public class AutopilotSessionFragment extends CameraFragment {
         setNumThreads(preferencesManager.getNumThreads());
         binding.threads.setText(String.valueOf(getNumThreads()));
         binding.cameraToggle.setOnClickListener(v -> toggleCamera());
-        memoryText = getString(R.string.memory_info_empty);
+        forwardMemoryText = getString(R.string.memory_info_empty);
         updateIndicatorInfo();
 
         if (vehicle.getConnectionType().equals("USB")) {
@@ -194,7 +206,9 @@ public class AutopilotSessionFragment extends CameraFragment {
                         f -> f.type.equals(Model.TYPE.CMDNAV_MEM) && f.pathType != Model.PATH_TYPE.URL);
         List<String> backwardModels =
                 getModelNames(
-                        f -> f.type.equals(Model.TYPE.CMDNAV) && f.pathType != Model.PATH_TYPE.URL);
+                        f ->
+                                (f.type.equals(Model.TYPE.CMDNAV) || f.type.equals(Model.TYPE.CMDNAV_MEM))
+                                        && f.pathType != Model.PATH_TYPE.URL);
         if (forwardModels.isEmpty() || backwardModels.isEmpty()) {
             Toast.makeText(
                             requireContext().getApplicationContext(),
@@ -358,8 +372,8 @@ public class AutopilotSessionFragment extends CameraFragment {
                             forwardModel, device, numThreads);
                     AutopilotMem net = new AutopilotMem(requireActivity(), forwardModel, device, numThreads);
                     forwardCrop = new Crop(net, frameWidth, frameHeight, sensorOrientation);
-                    memory = new float[2 * net.getMemLen()];
-                    showMemory(memory.clone());
+                    forwardMemory = new float[2 * net.getMemLen()];
+                    showMemory(false, forwardMemory.clone());
                     forwardNet = net;
                 } catch (IllegalArgumentException | IOException e) {
                     showNetworkError(e);
@@ -370,14 +384,25 @@ public class AutopilotSessionFragment extends CameraFragment {
             if (backwardNet != null) backwardNet.close();
             backwardNet = null;
             backwardCrop = null;
+            backwardMemory = null;
+            backwardMemoryText = "";
             if (backwardModel != null) {
                 try {
                     Timber.d(
                             "Creating backward autopilot (model=%s, device=%s, numThreads=%d)",
                             backwardModel, device, numThreads);
-                    Autopilot net = new Autopilot(requireActivity(), backwardModel, device, numThreads);
-                    backwardCrop = new Crop(net, frameWidth, frameHeight, sensorOrientation);
-                    backwardNet = net;
+                    if (backwardModel.type.equals(Model.TYPE.CMDNAV_MEM)) {
+                        AutopilotMem net =
+                                new AutopilotMem(requireActivity(), backwardModel, device, numThreads);
+                        backwardCrop = new Crop(net, frameWidth, frameHeight, sensorOrientation);
+                        backwardMemory = new float[2 * net.getMemLen()];
+                        showMemory(true, backwardMemory.clone());
+                        backwardNet = net;
+                    } else {
+                        Autopilot net = new Autopilot(requireActivity(), backwardModel, device, numThreads);
+                        backwardCrop = new Crop(net, frameWidth, frameHeight, sensorOrientation);
+                        backwardNet = net;
+                    }
                 } catch (IllegalArgumentException | IOException e) {
                     showNetworkError(e);
                 }
@@ -524,8 +549,8 @@ public class AutopilotSessionFragment extends CameraFragment {
 
     /**
      * The overlay and the direction button. The overlay shows the indicator with its cmd value -
-     * every model gets it as cmd - and, while driving forward, the memory as the forward model sees
-     * it. Runs on the UI thread.
+     * every model gets it as cmd - and the active model's memory as it sees it, if it has one. Runs
+     * on the UI thread.
      */
     private void updateIndicatorInfo() {
         final boolean reverse = isReversing();
@@ -551,33 +576,40 @@ public class AutopilotSessionFragment extends CameraFragment {
             label = R.string.indicator_forward;
             color = R.color.green;
         }
+        final String memoryText = reverse ? backwardMemoryText : forwardMemoryText;
         binding.indicatorInfo.setText(
-                reverse ? getString(label) : getString(label) + "\n" + memoryText);
+                memoryText.isEmpty() ? getString(label) : getString(label) + "\n" + memoryText);
         binding.indicatorInfo.setTextColor(ContextCompat.getColor(requireContext(), color));
     }
 
-    /** Back to donkeycar's starting memory of (0, 0) per pair. Runs on the inference thread. */
+    /** Both memories back to donkeycar's starting (0, 0) per pair. Runs on the inference thread. */
     private void resetMemory() {
-        if (memory == null) return;
-        Arrays.fill(memory, 0f);
-        showMemory(memory.clone());
+        if (forwardMemory != null) {
+            Arrays.fill(forwardMemory, 0f);
+            showMemory(false, forwardMemory.clone());
+        }
+        if (backwardMemory != null) {
+            Arrays.fill(backwardMemory, 0f);
+            showMemory(true, backwardMemory.clone());
+        }
     }
 
-    /** Shifts the oldest pair out and the model's newest output in. Runs on the inference thread. */
-    private void pushMemory(Control output) {
+    /** Shifts the oldest pair out and the newest control in. Runs on the inference thread. */
+    private static void pushMemory(float[] memory, Control output) {
         System.arraycopy(memory, 2, memory, 0, memory.length - 2);
         memory[memory.length - 2] = output.getSteering() / Control.MAX;
         memory[memory.length - 1] = output.getThrottle() / Control.MAX;
     }
 
-    /** Puts the memory on screen, oldest pair first, as the model sees it. */
-    private void showMemory(float[] snapshot) {
+    /** Puts a memory on screen, oldest pair first, as the model sees it. */
+    private void showMemory(boolean backward, float[] snapshot) {
         StringBuilder text = new StringBuilder("MEM");
         for (int i = 0; i < snapshot.length; i += 2) {
             text.append(i == 0 ? "  " : " | ")
                     .append(String.format(Locale.US, "%+.2f,%.2f", snapshot[i], snapshot[i + 1]));
         }
-        memoryText = text.toString();
+        if (backward) backwardMemoryText = text.toString();
+        else forwardMemoryText = text.toString();
         requireActivity().runOnUiThread(this::updateIndicatorInfo);
     }
 
@@ -694,12 +726,13 @@ public class AutopilotSessionFragment extends CameraFragment {
             Timber.i("Switched to the %s model", reverse ? "backward" : "forward");
         }
         if (isTakenOver()) {
-            // You drive. The forward model's memory gets what the car actually did, as in the
+            // You drive. The active model's memory gets what the car actually did, as in the
             // recorded data, so it carries on from your driving when you let go.
             Control human = humanControl;
-            if (!reverse && memory != null) {
-                pushMemory(human);
-                showMemory(memory.clone());
+            float[] memory = reverse ? backwardMemory : forwardMemory;
+            if (memory != null) {
+                pushMemory(memory, human);
+                showMemory(reverse, memory.clone());
             }
             handleDriveCommand(human);
             return;
@@ -712,19 +745,31 @@ public class AutopilotSessionFragment extends CameraFragment {
                 handleDriveCommand(new Control(0, 0));
                 return;
             }
+            Bitmap input = backwardCrop.from(frame);
             Control output =
-                    backwardNet.recognizeImage(backwardCrop.from(frame), vehicle.getIndicator());
-            handleDriveCommand(new Control(output.getSteering(), Math.min(output.getThrottle(), 0)));
+                    backwardNet instanceof AutopilotMem
+                            ? ((AutopilotMem) backwardNet)
+                                    .recognizeImage(input, backwardMemory, vehicle.getIndicator())
+                            : ((Autopilot) backwardNet).recognizeImage(input, vehicle.getIndicator());
+            Control reversing = new Control(output.getSteering(), Math.min(output.getThrottle(), 0));
+            if (backwardMemory != null) {
+                pushMemory(backwardMemory, reversing);
+                showMemory(true, backwardMemory.clone());
+            }
+            handleDriveCommand(reversing);
         } else {
-            if (forwardNet == null || memory == null) {
+            if (forwardNet == null || forwardMemory == null) {
                 handleDriveCommand(new Control(0, 0));
                 return;
             }
             Control output =
-                    forwardNet.recognizeImage(forwardCrop.from(frame), memory, vehicle.getIndicator());
-            pushMemory(output);
-            showMemory(memory.clone());
-            handleDriveCommand(output);
+                    forwardNet.recognizeImage(
+                            forwardCrop.from(frame), forwardMemory, vehicle.getIndicator());
+            // cil_mobile_fast_memory's throttle is linear: never let it reverse mid-forward.
+            Control forward = new Control(output.getSteering(), Math.max(output.getThrottle(), 0));
+            pushMemory(forwardMemory, forward);
+            showMemory(false, forwardMemory.clone());
+            handleDriveCommand(forward);
         }
     }
 

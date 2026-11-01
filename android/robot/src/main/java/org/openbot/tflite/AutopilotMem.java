@@ -13,13 +13,15 @@ import org.openbot.vehicle.Control;
 import timber.log.Timber;
 
 /**
- * Autopilot for the {@code donkey_memory} policy, donkeycar's "memory" pilot: one camera frame plus
- * the last {@code memLen} (steering, throttle) pairs the model itself produced, and - for a model
- * trained with {@code --mem_cmd} - the indicator as a cmd input.
+ * Autopilot for the memory policies, donkeycar's "memory" pilot ({@code donkey_memory}, and {@code
+ * donkey_memory_reverse} for driving backward) and {@code cil_mobile_fast_memory}: one camera frame plus the last {@code memLen} (steering, throttle) pairs
+ * the model itself produced, and - for cil_mobile_fast_memory or a donkey_memory model trained with
+ * {@code --mem_cmd} - the indicator as a cmd input.
  *
  * <p>The memory is laid out the way training built it: {@code [s(t-N), t(t-N), ..., s(t-1),
  * t(t-1)]}, oldest first, in the model's own normalized units (raw device units / 255). Keeping
- * that history is the caller's job, see {@link org.openbot.autopilot.AutopilotMemFragment}.
+ * that history is the caller's job, see {@link org.openbot.autopilot.AutopilotMemFragment} and
+ * {@link org.openbot.autopilot.AutopilotSessionFragment}.
  *
  * <p>Inputs are found by name rather than position, since a model has two or three of them
  * depending on how it was trained.
@@ -83,7 +85,10 @@ public class AutopilotMem extends Network {
     return memLen;
   }
 
-  /** Whether the model was trained with the indicator as a cmd input ({@code --mem_cmd}). */
+  /**
+   * Whether the model takes the indicator as a cmd input (cil_mobile_fast_memory, or donkey_memory
+   * with {@code --mem_cmd}).
+   */
   public boolean hasCmdInput() {
     return cmdIndex >= 0;
   }
@@ -127,8 +132,9 @@ public class AutopilotMem extends Network {
     Timber.v("Timecost to run model inference: %s", (endTime - startTime));
 
     Trace.endSection(); // "recognizeImage"
-    // Model output is (steering, throttle) directly: tanh steering in [-1, 1] and sigmoid
-    // throttle in [0, 1], mapped onto Control's raw units like the other autopilots.
+    // Model output is (steering, throttle) directly - donkey_memory's tanh steering and sigmoid
+    // throttle (tanh in donkey_memory_reverse), cil_mobile_fast_memory's linear pair - mapped onto
+    // Control's raw units like the other autopilots.
     return new Control(predicted_ctrl[0][0] * Control.MAX, predicted_ctrl[0][1] * Control.MAX);
   }
 
