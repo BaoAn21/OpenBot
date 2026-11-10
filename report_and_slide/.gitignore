@@ -1,0 +1,6 @@
+# Friend's thesis, kept locally for reference only
+friend_report/
+friend_slide/
+
+# Built output; rebuild with `typst compile report/main.typ`
+report/*.pdf

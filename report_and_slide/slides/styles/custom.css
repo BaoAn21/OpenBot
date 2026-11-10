@@ -1,0 +1,4 @@
+.slidev-layout h1 { font-weight: 700; }
+.caption { font-size: 0.8rem; opacity: 0.6; margin-top: 0.4rem; }
+/* Bigger code so it reads from the back of the room. */
+:root { --slidev-code-font-size: 18px; --slidev-code-line-height: 30px; }
