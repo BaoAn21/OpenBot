@@ -87,6 +87,9 @@ class Hyperparameters:
     COLOR_AUG: bool = False
     # The turn-weighted autopilot loss for a memory model instead of donkeycar's mse.
     TURN_LOSS: bool = False
+    # Memory dropout and noise in training (data_augmentation.augment_mem), for any
+    # memory model.
+    MEM_AUG: bool = False
 
     # Records directory, absolute or relative to dataset/; empty means the default
     # for the configuration (tfrecords_path).
@@ -143,6 +146,8 @@ class Hyperparameters:
                 model_name += "_color"
             if self.TURN_LOSS:
                 model_name += "_turnloss"
+        if self.MEM_AUG:
+            model_name += "_memaug"
 
         return model_name
 
@@ -271,8 +276,9 @@ def load_tfrecord(tr: Training, verbose=0):
             # donkeycar's memory model: the previous controls take the place of the
             # cmd input, and its default config applies no augmentation at all.
             # --color_aug opts into the same colour jitter the other models get.
-            # cil_mobile_fast_memory always gets it and may flip (FLIP_AUG and CMD_AUG
-            # are refused for donkey_memory), with the memory mirrored too.
+            # cil_mobile_fast_memory always gets it. Any memory model may flip
+            # (--flip_aug, opt-in for donkey_memory), with the memory mirrored too;
+            # CMD_AUG is refused for donkey_memory.
             mem = features["mem"]
             cmd_input = features["cmd"]
             label = [features["left"], features["right"]]
@@ -282,6 +288,8 @@ def load_tfrecord(tr: Training, verbose=0):
                 image, cmd_input, mem, label = data_augmentation.flip_sample_mem(
                     image, cmd_input, mem, label
                 )
+            if tr.hyperparameters.MEM_AUG:
+                mem = data_augmentation.augment_mem(mem)
             if tr.hyperparameters.CMD_AUG:
                 cmd_input = data_augmentation.augment_cmd(cmd_input)
             if tr.hyperparameters.MEM_CMD:
@@ -966,6 +974,12 @@ if __name__ == "__main__":
         "autopilot loss (losses.sq_weighted_mse_angle) instead of donkeycar's mse",
     )
     parser.add_argument(
+        "--mem_aug",
+        action="store_true",
+        help="memory policy (any memory model): zero the memory or offset it at random "
+        "in training, so the model relies more on the image",
+    )
+    parser.add_argument(
         "--records_dir",
         default=None,
         help="read the tfrecords from this directory (absolute or relative to "
@@ -1088,17 +1102,20 @@ if __name__ == "__main__":
             f"--turn_loss is for the donkey_memory models; {params.MODEL} always uses "
             "the turn-weighted loss"
         )
+    if args.mem_aug and not is_mem_model:
+        parser.error(f"--mem_aug needs a memory model, not {params.MODEL}")
     if is_mem_model:
         if params.SEQ_LEN > 1 or args.trim_stationary:
             parser.error(f"--model {params.MODEL} takes no stacked-frame options")
         if args.policy != "autopilot":
             parser.error(f"--model {params.MODEL} is autopilot only")
         params.MEM_LEN = args.mem_len or tfrecord_mem.DEFAULT_MEM_LEN
+        params.MEM_AUG = args.mem_aug
     if is_donkey:
-        if args.flip_aug or args.cmd_aug:
+        if args.cmd_aug:
             parser.error(
                 f"--model {params.MODEL} is donkeycar's memory model as is: no "
-                "--flip_aug or --cmd_aug"
+                "--cmd_aug"
             )
         params.MEM_CMD = args.mem_cmd
         params.COLOR_AUG = args.color_aug

@@ -124,3 +124,32 @@ def flip_sample_mem(img, cmd, mem, label):
         lambda: tf.stack([label[0], label[1]]),
     )
     return img, cmd, mem, label
+
+
+# Memory augmentation (--mem_aug): how unreliable a memory model's memory is made in
+# training, in normalized units (0.1 ~ 25 raw).
+MEM_DROP_PROB = 0.3  # whole memory zeroed, the state the phone starts every run in
+MEM_STEER_OFFSET = 0.1  # sd of one offset added to every steering in the memory
+MEM_THROTTLE_OFFSET = 0.05  # the same for the throttles
+MEM_JITTER = 0.02  # sd of the noise per value on top
+
+
+def augment_mem(mem):
+    """
+    Makes a memory model's memory [s(t-N), t(t-N), ..., s(t-1), t(t-1)] less
+    trustworthy, so the model has to look at the image. Driving, the memory holds the
+    model's own outputs, and their error is a bias rather than noise: a model that
+    steers too little remembers steering too little every frame. So:
+      - with MEM_DROP_PROB the memory is zeroed, as the phone starts every run, and the
+        image is all there is;
+      - otherwise one random offset is added to all steerings and one to all
+        throttles, plus a little noise per value.
+    The label stays the recorded control, so where image and memory disagree the model
+    learns to follow the image.
+    """
+    pairs = mem.shape[0] // 2
+    offset = tf.random.normal([2]) * [MEM_STEER_OFFSET, MEM_THROTTLE_OFFSET]
+    noisy = mem + tf.tile(offset, [pairs]) + tf.random.normal(mem.shape) * MEM_JITTER
+    noisy = tf.clip_by_value(noisy, -1.0, 1.0)
+    drop = tf.random.uniform([]) < MEM_DROP_PROB
+    return tf.where(drop, tf.zeros_like(mem), noisy)
