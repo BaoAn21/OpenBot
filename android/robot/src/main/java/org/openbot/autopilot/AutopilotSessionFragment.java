@@ -17,6 +17,8 @@ import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Spinner;
 import android.widget.Toast;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.camera.core.ImageProxy;
@@ -68,6 +70,9 @@ import timber.log.Timber;
  * <p>Moving the gamepad stick while autopilot is on takes over: you drive, the models don't run,
  * and the active direction's memory follows what the car does. Once the stick has been centred for
  * {@link #TAKEOVER_RELEASE_MS} the models drive again.
+ *
+ * <p>The Logging switch (or the gamepad's x) records the run with a {@link SessionLog}: the data
+ * logger's files for every inferred frame, plus who drove it and what the model predicted.
  *
  * <p>The forward spinner only offers CMDNAV_MEM models, the backward one CMDNAV and CMDNAV_MEM
  * models. Forward needs the memory input; backward needs a model that can reverse - a donkey_memory
@@ -132,6 +137,9 @@ public class AutopilotSessionFragment extends CameraFragment {
 
     /** You drive until then: MAX_VALUE while the stick is off centre. */
     private volatile long humanUntilMs = 0;
+
+    /** Non-null while the run is logged. Read once per frame on the inference thread. */
+    @Nullable private volatile SessionLog sessionLog;
 
     /** Set once the camera delivered a frame, so the crops can be sized to it. */
     private volatile boolean frameConfigured = false;
@@ -303,6 +311,7 @@ public class AutopilotSessionFragment extends CameraFragment {
                                 Enums.VehicleIndicator.REVERSE, Constants.CMD_INDICATOR_REVERSE));
 
         binding.autoSwitch.setOnClickListener(v -> setNetworkEnabled(binding.autoSwitch.isChecked()));
+        binding.logSwitch.setOnClickListener(v -> setLogging(binding.logSwitch.isChecked()));
         BotToControllerEventBus.emitEvent(
                 ConnectionUtils.createStatus(
                         "FRAGMENT_TYPE", Enums.FragmentType.AUTOPILOT.getFragment()));
@@ -448,6 +457,8 @@ public class AutopilotSessionFragment extends CameraFragment {
 
     @Override
     public synchronized void onPause() {
+        // Queued on the inference thread before it quits, so the log ends after its last frame.
+        stopLogging();
         handlerThread.quitSafely();
         try {
             handlerThread.join();
@@ -511,14 +522,61 @@ public class AutopilotSessionFragment extends CameraFragment {
                                 Enums.SpeedMode.getByID(preferencesManager.getSpeedMode())));
                 break;
 
+            case Constants.CMD_LOGS:
+                setLogging(sessionLog == null);
+                break;
+
             case Constants.CMD_INDICATOR_LEFT:
             case Constants.CMD_INDICATOR_RIGHT:
             case Constants.CMD_INDICATOR_STOP:
             case Constants.CMD_INDICATOR_REVERSE:
+                final SessionLog log = sessionLog;
+                if (log != null) log.indicator(vehicle.getIndicator());
                 updateIndicatorInfo();
                 break;
         }
     }
+
+    @Override
+    protected boolean isLoggingEnabledForStatus() {
+        return sessionLog != null;
+    }
+
+    /** The Logging switch, the gamepad's x and the controllers' log button. UI thread. */
+    private void setLogging(boolean enabled) {
+        if (enabled && sessionLog == null) {
+            if (!PermissionUtils.hasLoggingPermissions(requireActivity())) {
+                binding.logSwitch.setChecked(false);
+                requestLoggingPermissions.launch(Constants.PERMISSIONS_LOGGING);
+                return;
+            }
+            sessionLog = new SessionLog(requireActivity(), vehicle);
+            Timber.i("Logging the session to %s", sessionLog.getFolderName());
+        } else if (!enabled) {
+            stopLogging();
+        }
+        binding.logSwitch.setChecked(sessionLog != null);
+        audioPlayer.playLogging(voice, sessionLog != null);
+        BotToControllerEventBus.emitEvent(ConnectionUtils.createStatus("LOGS", sessionLog != null));
+    }
+
+    /** Ends the log after the frame the inference thread is on, if any. UI thread. */
+    private void stopLogging() {
+        final SessionLog log = sessionLog;
+        if (log == null) return;
+        sessionLog = null;
+        binding.logSwitch.setChecked(false);
+        if (handler != null) runInBackground(log::stop);
+        else log.stop();
+    }
+
+    private final ActivityResultLauncher<String[]> requestLoggingPermissions =
+            registerForActivityResult(
+                    new ActivityResultContracts.RequestMultiplePermissions(),
+                    result -> {
+                        if (result.values().stream().allMatch(granted -> granted)) setLogging(true);
+                        else PermissionUtils.showLoggingPermissionsToast(requireActivity());
+                    });
 
     @Override
     protected void handleJoystickControl(Control control) {
@@ -687,6 +745,9 @@ public class AutopilotSessionFragment extends CameraFragment {
 
             computingNetwork = true;
             Timber.i("Putting image " + frameNum + " for detection in bg thread.");
+            final long frame = frameNum;
+            final SessionLog log = sessionLog;
+            if (log != null) log.frame(frame);
 
             runInBackground(
                     () -> {
@@ -697,7 +758,7 @@ public class AutopilotSessionFragment extends CameraFragment {
                                 requireActivity().runOnUiThread(() -> setIndicator(detected));
                             }
                         }
-                        drive(bitmap);
+                        drive(bitmap, frame);
                         lastProcessingTimeMs = SystemClock.elapsedRealtime() - startTime;
                         computingNetwork = false;
                     });
@@ -716,8 +777,12 @@ public class AutopilotSessionFragment extends CameraFragment {
         }
     }
 
-    /** One frame of driving with the model the indicator picks. Runs on the inference thread. */
-    private void drive(Bitmap frame) {
+    /**
+     * One frame of driving with the model the indicator picks. Runs on the inference thread. While
+     * logging, the frame gets an autopilotLog row and its model input is saved.
+     */
+    private void drive(Bitmap frame, long frameNum) {
+        final SessionLog log = sessionLog;
         final boolean reverse = isReversing();
         if (reverse != lastReverse) {
             lastReverse = reverse;
@@ -725,52 +790,96 @@ public class AutopilotSessionFragment extends CameraFragment {
             switchUntilMs = SystemClock.elapsedRealtime() + SWITCH_PAUSE_MS;
             Timber.i("Switched to the %s model", reverse ? "backward" : "forward");
         }
+        final Network net = reverse ? backwardNet : forwardNet;
+        final Crop crop = reverse ? backwardCrop : forwardCrop;
+        final float[] memory = reverse ? backwardMemory : forwardMemory;
+        // The frame as the active model sees it; null without a model for this direction.
+        final Bitmap input = crop == null ? null : crop.from(frame);
+        // What a memory model sees on this frame, before this frame's command goes in.
+        final float[] seen = log != null && memory != null ? memory.clone() : null;
+        final String source;
+        final Control sent;
+        Control prediction = null;
+        long inferenceNs = 0;
+
         if (isTakenOver()) {
             // You drive. The active model's memory gets what the car actually did, as in the
             // recorded data, so it carries on from your driving when you let go.
-            Control human = humanControl;
-            float[] memory = reverse ? backwardMemory : forwardMemory;
+            source = "human";
+            sent = humanControl;
+            handleDriveCommand(sent);
+            if (log != null && net != null) {
+                // Not driving, only logged: what the model would have done in your place.
+                final long start = SystemClock.elapsedRealtimeNanos();
+                prediction = predict(net, input, memory);
+                inferenceNs = SystemClock.elapsedRealtimeNanos() - start;
+            }
             if (memory != null) {
-                pushMemory(memory, human);
+                pushMemory(memory, sent);
                 showMemory(reverse, memory.clone());
             }
-            handleDriveCommand(human);
-            return;
-        }
-        if (SystemClock.elapsedRealtime() < switchUntilMs) {
+        } else if (SystemClock.elapsedRealtime() < switchUntilMs) {
             // Let the car stop before the other model drives.
-            handleDriveCommand(new Control(0, 0));
-        } else if (reverse) {
-            if (backwardNet == null) {
-                handleDriveCommand(new Control(0, 0));
-                return;
-            }
-            Bitmap input = backwardCrop.from(frame);
-            Control output =
-                    backwardNet instanceof AutopilotMem
-                            ? ((AutopilotMem) backwardNet)
-                                    .recognizeImage(input, backwardMemory, vehicle.getIndicator())
-                            : ((Autopilot) backwardNet).recognizeImage(input, vehicle.getIndicator());
-            Control reversing = new Control(output.getSteering(), Math.min(output.getThrottle(), 0));
-            if (backwardMemory != null) {
-                pushMemory(backwardMemory, reversing);
-                showMemory(true, backwardMemory.clone());
-            }
-            handleDriveCommand(reversing);
+            source = "pause";
+            sent = new Control(0, 0);
+            handleDriveCommand(sent);
+        } else if (net == null) {
+            source = "none";
+            sent = new Control(0, 0);
+            handleDriveCommand(sent);
         } else {
-            if (forwardNet == null || forwardMemory == null) {
-                handleDriveCommand(new Control(0, 0));
-                return;
+            source = "model";
+            final long start = SystemClock.elapsedRealtimeNanos();
+            prediction = predict(net, input, memory);
+            inferenceNs = SystemClock.elapsedRealtimeNanos() - start;
+            // The switch decides the direction, the model only how much: cil_mobile_fast_memory's
+            // throttle is linear, never let it change direction mid-run.
+            final float throttle =
+                    reverse ? Math.min(prediction.getThrottle(), 0) : Math.max(prediction.getThrottle(), 0);
+            sent = new Control(prediction.getSteering(), throttle);
+            if (memory != null) {
+                pushMemory(memory, sent);
+                showMemory(reverse, memory.clone());
             }
-            Control output =
-                    forwardNet.recognizeImage(
-                            forwardCrop.from(frame), forwardMemory, vehicle.getIndicator());
-            // cil_mobile_fast_memory's throttle is linear: never let it reverse mid-forward.
-            Control forward = new Control(output.getSteering(), Math.max(output.getThrottle(), 0));
-            pushMemory(forwardMemory, forward);
-            showMemory(false, forwardMemory.clone());
-            handleDriveCommand(forward);
+            handleDriveCommand(sent);
         }
+
+        if (log != null) {
+            final Model model = reverse ? backwardModel : forwardModel;
+            log.row(
+                    frameNum,
+                    String.format(
+                            Locale.US,
+                            "%s,%s,%s,%s,%s,%.1f,%.1f,%s,%s",
+                            source,
+                            reverse ? "bwd" : "fwd",
+                            net == null || model == null ? "" : FileUtils.nameWithoutExtension(model.name),
+                            prediction == null ? "" : String.format(Locale.US, "%.1f", prediction.getSteering()),
+                            prediction == null ? "" : String.format(Locale.US, "%.1f", prediction.getThrottle()),
+                            sent.getSteering(),
+                            sent.getThrottle(),
+                            prediction == null ? "" : String.format(Locale.US, "%.1f", inferenceNs / 1e6),
+                            memoryText(seen)),
+                    input == null ? null : input.copy(Bitmap.Config.ARGB_8888, false));
+        }
+    }
+
+    /** A model's raw output for one frame, before the throttle clamp. Inference thread. */
+    private Control predict(Network net, Bitmap input, @Nullable float[] memory) {
+        return net instanceof AutopilotMem
+                ? ((AutopilotMem) net).recognizeImage(input, memory, vehicle.getIndicator())
+                : ((Autopilot) net).recognizeImage(input, vehicle.getIndicator());
+    }
+
+    /** A memory for autopilotLog, space separated so the row keeps its columns; "" for none. */
+    private static String memoryText(@Nullable float[] memory) {
+        if (memory == null) return "";
+        StringBuilder text = new StringBuilder();
+        for (float value : memory) {
+            if (text.length() > 0) text.append(' ');
+            text.append(String.format(Locale.US, "%.3f", value));
+        }
+        return text.toString();
     }
 
     /** For an {@link IndicatorSource}: what the gamepad buttons do, from the UI thread. */
@@ -802,6 +911,8 @@ public class AutopilotSessionFragment extends CameraFragment {
         vehicle.setControl(control);
         float steering = vehicle.getSteering();
         float throttle = vehicle.getThrottle();
+        final SessionLog log = sessionLog;
+        if (log != null) log.control(steering, throttle);
         requireActivity()
                 .runOnUiThread(
                         () -> binding.controllerContainer.controlInfo.setText(

@@ -20,13 +20,16 @@ conda activate openbot
 
 ## 1. Copy the recordings
 
-Copy the recording folders from the phone (named like `20261025_110811`) into:
+Copy the recordings from the phone (named like `20261025_110811`, the folders or the
+`.zip` files) into:
 
 ```
 policy/dataset/fwdbwd/inbox/
 ```
 
 Drive forward and backward in the same recording as you like; the split sorts it out.
+`split_direction.py` unpacks the zips into folders and deletes them, also on `--dry_run`.
+A broken zip (cut off on the phone) is reported and deleted.
 
 ## 2 + 3. Split forward/backward and train/test
 
@@ -69,6 +72,15 @@ python train_fwdbwd.py bwd --sessions 1 3 --num_epochs 60   # other options go t
   `--early_stop 0` trains all epochs; `--early_stop 30` waits longer (the cil models'
   val loss is noisier).
   The flip mirrors the memory too (its steering negated), so it stays consistent.
+- `--flip_aug` also works for `donkey_memory` and `donkey_memory_reverse` (off by default,
+  e.g. `python train_fwdbwd.py fwd --flip_aug`); the folder gets `_flip`. It assumes a
+  mirrored frame is still a valid one: phone mounted near the centre, no keeping to one
+  side of the track.
+- `--mem_aug` (any memory model, e.g. `python train_fwdbwd.py fwd --mem_aug`) makes the
+  memory unreliable in training - sometimes zeroed, otherwise offset at random - so the
+  model has to look at the image more. No records rebuild; the folder gets `_memaug`.
+  Train loss goes up and val may get a little worse; compare it with a run without it
+  on the same sessions by the closed-loop numbers and on the robot.
 - The model lands in `models/<fwd|bwd>_s<sessions>_<settings>/`, for example
   `models/fwd_s1-2-3_donkey_memory_lr0.0003_bz128_mem3_color/`, with a
   `data_manifest.txt` listing every data folder it was trained on.
@@ -89,11 +101,39 @@ python train_fwdbwd.py bwd --sessions 1 3 --num_epochs 60   # other options go t
 - Put `checkpoints/best.tflite` on the phone (the checkpoint with the best val loss).
 - Note the run in `policy/EXPERIMENTS.md`: sessions, metrics, robot result.
 
+## 6. Autopilot runs: how the models drive, and your takeovers as data
+
+The Autopilot Session screen's **Logging** switch (or the gamepad's x) records a run to
+`Documents/OpenBot/autopilot_<date>.zip` on the phone: every frame the models drove, who
+drove it (the model, or you when you take over with the stick) and what the model
+predicted, also while you drove. Copy the zips into `dataset/fwdbwd/autopilot_runs/`.
+
+```bash
+python autopilot_log.py report                 # every run: takeovers per minute, plots
+python autopilot_log.py extract --dry_run      # what extract would take
+python autopilot_log.py extract                # your takeovers -> inbox/<run>_takeover/
+python split_direction.py --note "takeovers of fwd_s1-2-3, 11-06"
+```
+
+- `report` prints per run and per model how long the model and you drove, the takeovers
+  per minute the model drove (the number to compare models by on the robot), and how far
+  the model was from you while you drove. It saves `autopilot_report.png` in the run's
+  folder: the model's prediction and the command over time, your takeovers shaded.
+- `extract` keeps only the frames you drove, each takeover minus its first 0.3 s (your
+  reaction, the car still doing what the model did) and its last 0.3 s before you let go
+  (`--trim_start`, `--trim_end`). The result is a normal recording for the inbox.
+- Never put a run itself in the inbox: its labels are mostly the model's own output.
+  `split_direction.py` parks it in `parked/autopilot/` if you do.
+- Give the takeovers their own session, so you choose whether a model trains on them
+  (`train_fwdbwd.py fwd --sessions 1 2 3 4`). They are all corrections, so train them
+  together with normal driving, not alone.
+
 ## Where things are
 
 ```
 dataset/fwdbwd/
   inbox/                          new recordings waiting for split_direction.py
+  autopilot_runs/                 Autopilot Session logs, for autopilot_log.py
   raw/session_<N>/<recording>/    the recordings as recorded (plus matched_* files)
   raw/session_<N>/note.txt        your note
   raw/session_<N>/test_recordings.txt   which recordings went to test

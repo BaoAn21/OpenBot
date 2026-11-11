@@ -2,7 +2,8 @@
 
 Everything for the Autopilot Session models lives in dataset/fwdbwd/:
 
-  inbox/                         copy new recordings from the phone here
+  inbox/                         copy new recordings from the phone here (the
+                                 folders, or the .zip files, unpacked and deleted)
   raw/session_<N>/<recording>/   the recordings, matched, untouched otherwise
                                  + test_recordings.txt, note.txt
   train/fwd/session_<N>/...      forward runs   (donkey_memory)
@@ -27,8 +28,9 @@ Train/test is per recording, so no test frame has a neighbour in training: a ran
 to test, both its forward and its backward part.
 
 Recordings without frames or controls go to parked/empty/; recordings the autopilot drove
-(inferenceTime.txt has rows, so the labels are the model's own output) to
-parked/autopilot/.
+(inferenceTime.txt has rows, or there is an Autopilot Session autopilotLog.txt, so the
+labels are the model's own output) to parked/autopilot/. For a Session log,
+autopilot_log.py extract puts your takeovers into the inbox instead.
 
 Each output folder gets its own raw logs (rgbFrames subset, full ctrlLog, an
 indicatorLog), so re-matching from scratch - which the record builder does - reproduces
@@ -45,6 +47,8 @@ import argparse
 import os
 import random
 import shutil
+import zipfile
+import zlib
 
 from openbot.associate_frames import match_frame_session
 
@@ -81,7 +85,44 @@ def unusable_reason(recording):
         return "empty"
     if data_rows(os.path.join(sensor, "inferenceTime.txt")) > 0:
         return "autopilot"
+    if os.path.exists(os.path.join(sensor, "autopilotLog.txt")):
+        return "autopilot"
     return None
+
+
+def unpack(zip_path, folder):
+    """The app zips the folder's contents; take a single top folder too."""
+    tmp = folder + ".unpacking"
+    try:
+        with zipfile.ZipFile(zip_path) as z:
+            z.extractall(tmp)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    entries = os.listdir(tmp)
+    top = os.path.join(tmp, entries[0])
+    if len(entries) == 1 and os.path.isdir(os.path.join(top, "sensor_data")):
+        os.rename(top, folder)
+        os.rmdir(tmp)
+    else:
+        os.rename(tmp, folder)
+    print(f"unpacked {os.path.basename(zip_path)}")
+
+
+def unpack_inbox(inbox):
+    """Unpack the phone's <recording>.zip files in the inbox and delete the zips.
+    A broken zip (cut off on the phone) can't be recovered, so it is only reported."""
+    zips = sorted(n for n in os.listdir(inbox) if n.endswith(".zip"))
+    both = [n for n in zips if os.path.exists(os.path.join(inbox, n[: -len(".zip")]))]
+    if both:
+        raise SystemExit(f"the inbox has both {both[0]} and its folder; remove one")
+    for n in zips:
+        zip_path = os.path.join(inbox, n)
+        try:
+            unpack(zip_path, zip_path[: -len(".zip")])
+        except (zipfile.BadZipFile, zlib.error, EOFError) as e:
+            print(f"{n} is broken ({e}), deleted")
+        os.remove(zip_path)
 
 
 def processed_rows(session_dir):
@@ -205,6 +246,8 @@ def main():
 
     root = os.path.abspath(args.root)
     inbox = os.path.join(root, "inbox")
+    if os.path.isdir(inbox):
+        unpack_inbox(inbox)  # also on a dry run: the folder holds the same data
     new = sorted(
         os.path.join(inbox, d)
         for d in (os.listdir(inbox) if os.path.isdir(inbox) else [])

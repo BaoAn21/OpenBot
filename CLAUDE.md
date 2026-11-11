@@ -108,7 +108,8 @@ the last `--mem_len` (default 3) predicted `(steering, throttle)` pairs. `--mem_
 the indicator, wired like `cil_mobile_fast` (own 16-16 MLP fused after the Dense(100), raw
 cmd again before the heads) - fed in raw beside the 8000 flattened image features it was
 barely used. `--color_aug` opts into the colour jitter every other model always gets (they
-reject the flag). Plain MSE (`--turn_loss` switches to `sq_weighted_mse_angle`), no flip/cmd aug. Records live in `dataset/tfrecords_mem<N>/`,
+reject the flag). Plain MSE (`--turn_loss` switches to `sq_weighted_mse_angle`); `--flip_aug` opt-in (the
+memory's steering is mirrored too, `flip_sample_mem`), no cmd aug. Records live in `dataset/tfrecords_mem<N>/`,
 shared by runs with and without `--mem_cmd`, so rebuild them after any data change
 (`train_fwdbwd.py` does that for the fwdbwd data; `--create_tf_record` for `train_data`). That path only *reads* `matched_frame_ctrl_cmd_processed.txt` and never runs
 `associate_frames`, so freshly recorded sessions must be matched first
@@ -118,10 +119,19 @@ an empty `ctrlLog.txt` makes that raise, park it instead. Its val metrics are te
 `logs/eval_rollout.png` and on the robot. Phone side: `tflite/AutopilotMem` and the
 "Autopilot Memory" screen, model type `CMDNAV_MEM` (inputs found by name).
 
+**Memory augmentation (`--mem_aug`, any memory model, opt-in).** Against the memory
+shortcut (the recorded last steering is ~the answer, so the image path barely trains):
+`data_augmentation.augment_mem` zeroes the whole memory with p 0.3 (the phone's start state),
+otherwise adds one random offset to all its steerings (sd 0.1) and one to all its throttles
+(sd 0.05), plus per-value jitter 0.02 - one offset because a driving model's own error is a
+bias, not noise. Training samples only, after the flip; labels and val untouched, so expect a
+higher train loss and judge it closed loop. Constants at the top of the function's block.
+Model folders get `_memaug`.
+
 **Reverse donkey (`--model donkey_memory_reverse`).** A separate copy of `donkey_memory` whose
 throttle head is tanh instead of sigmoid, so it can reverse; kept apart so `donkey_memory` stays
 donkeycar's. `train.DONKEY_MODELS` makes it train exactly like donkey_memory (no BN, plain MSE,
-`--mem_cmd`/`--color_aug`/`--turn_loss` opt-in, no flip). For the Autopilot Session backward
+`--mem_cmd`/`--color_aug`/`--turn_loss`/`--flip_aug` opt-in, no cmd aug). For the Autopilot Session backward
 model: `train_fwdbwd.py bwd --model donkey_memory_reverse` (bwd memory records, `--color_aug`);
 on the phone a `CMDNAV_MEM` model in the backward spinner.
 
@@ -155,7 +165,13 @@ existing model folder unless `--resume`. `dataset/train_data/test_data` hold onl
 `--create_tf_record` path still builds from them and deletes the manifest. The indicator sets
 (`indicator_training`, `indicator_data_session_2`) are another session on another track and
 `my_dataset_1/2` are older still; all are parked in `_other_sessions/` and not trained on.
-`make_forward_only.py` sets every cmd to 0 - never run it on indicator data. `policy/EXPERIMENTS.md` logs every dataset and trained model (models/ and
+Autopilot Session logs (the screen's Logging switch, `autopilot_<date>.zip` with
+`sensor_data/autopilotLog.txt`: per frame who drove - model/human/pause/none - and the model's
+prediction) go in `dataset/fwdbwd/autopilot_runs/`; `python autopilot_log.py report` scores
+them (takeovers per minute, `autopilot_report.png`) and `extract` turns the trimmed human
+takeovers into an inbox recording, writing its own ctrlLog from autopilotLog (the phone's
+holds the models' commands and is timestamped late). `split_direction.py` parks a raw run in
+`parked/autopilot/`. `make_forward_only.py` sets every cmd to 0 - never run it on indicator data. `policy/EXPERIMENTS.md` logs every dataset and trained model (models/ and
 dataset/ are gitignored); add an entry for each new run.
 
 `policy/frontend` is a separate CRA app (own `package.json`): `npm start`, `npm run build`, `npm test` inside `policy/frontend`.
