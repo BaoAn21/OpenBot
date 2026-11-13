@@ -14,6 +14,7 @@ import absl.logging
 from . import (
     associate_frames,
     callbacks,
+    check_tflite,
     dataloader,
     dataset_dir,
     data_augmentation,
@@ -45,6 +46,8 @@ AUTOTUNE = tf.data.experimental.AUTOTUNE
 
 # donkeycar's memory model and its reverse twin train the same way.
 DONKEY_MODELS = ("donkey_memory", "donkey_memory_reverse")
+# Trained on donkeycar's plain mse unless --turn_loss, without batch norm.
+MSE_MODELS = DONKEY_MODELS + ("donkey_rnn",)
 
 if tf.test.gpu_device_name():
     print("Default GPU Device:{}".format(tf.test.gpu_device_name()))
@@ -146,6 +149,8 @@ class Hyperparameters:
                 model_name += "_color"
             if self.TURN_LOSS:
                 model_name += "_turnloss"
+        elif self.MODEL in MSE_MODELS and self.TURN_LOSS:
+            model_name += "_turnloss"
         if self.MEM_AUG:
             model_name += "_memaug"
 
@@ -571,8 +576,8 @@ def do_training(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0):
 
     callback.broadcast("model", tr.model_name)
 
-    if tr.hyperparameters.MEM_LEN and not tr.hyperparameters.TURN_LOSS:
-        # donkeycar trains its memory model on plain mse, not the turn-weighted loss.
+    if tr.hyperparameters.MODEL in MSE_MODELS and not tr.hyperparameters.TURN_LOSS:
+        # donkeycar trains its models on plain mse, not the turn-weighted loss.
         tr.loss_fn = losses.mse_raw
     elif tr.hyperparameters.POLICY == "autopilot":
         tr.loss_fn = losses.sq_weighted_mse_angle
@@ -753,6 +758,16 @@ def do_evaluation(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0
     )
     utils.savefig(os.path.join(tr.log_path, "test_preview.png"))
     utils.compare_tf_tflite(last_model, last_tflite, policy=tr.hyperparameters.POLICY)
+    # The phone runs best.tflite frame after frame; check it computes what its checkpoint
+    # does that way (python check_tflite.py <model folder> runs this on any folder).
+    callback.broadcast("message", "Check best.tflite against its checkpoint...")
+    if not check_tflite.check(
+        os.path.join(tr.checkpoint_path, best_val_checkpoint),
+        os.path.join(tr.checkpoint_path, "best.tflite"),
+        tr.test_data_dir,
+        max_frames=500,
+    ):
+        print("WARNING: best.tflite does not compute what the checkpoint does - don't use it")
 
     if tr.hyperparameters.POLICY == "autopilot":
         callback.broadcast("message", "Generate evaluation preview...")
@@ -910,6 +925,7 @@ if __name__ == "__main__":
             "donkey_memory",
             "donkey_memory_reverse",
             "cil_mobile_fast_memory",
+            "donkey_rnn",
         ],
         help="network architecture (default: pilot_net)",
     )
@@ -970,7 +986,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--turn_loss",
         action="store_true",
-        help="memory policy (the donkey_memory models): train on the turn-weighted "
+        help="the donkey_memory models and donkey_rnn: train on the turn-weighted "
         "autopilot loss (losses.sq_weighted_mse_angle) instead of donkeycar's mse",
     )
     parser.add_argument(
@@ -1072,7 +1088,7 @@ if __name__ == "__main__":
     )
     if params.SEQ_LEN > 1 and not is_seq_model:
         parser.error(
-            f"stacked frames need --model pilot_net_seq, not {params.MODEL}"
+            f"stacked frames need --model pilot_net_seq or donkey_rnn, not {params.MODEL}"
         )
     if params.SEQ_LEN == 1 and is_seq_model:
         parser.error(f"--model {params.MODEL} needs --seq_offsets (or --seq_len)")
@@ -1097,10 +1113,10 @@ if __name__ == "__main__":
             f"--color_aug is for the donkey_memory models; {params.MODEL} always gets "
             "colour augmentation"
         )
-    if args.turn_loss and not is_donkey:
+    if args.turn_loss and params.MODEL not in MSE_MODELS:
         parser.error(
-            f"--turn_loss is for the donkey_memory models; {params.MODEL} always uses "
-            "the turn-weighted loss"
+            f"--turn_loss is for the donkey_memory models and donkey_rnn; "
+            f"{params.MODEL} always uses the turn-weighted loss"
         )
     if args.mem_aug and not is_mem_model:
         parser.error(f"--mem_aug needs a memory model, not {params.MODEL}")
@@ -1126,6 +1142,11 @@ if __name__ == "__main__":
         # cil_mobile_fast_memory trains like cil_mobile_fast: cmd input, colour
         # augmentation and the turn-weighted loss, always.
         params.MEM_CMD = params.COLOR_AUG = params.TURN_LOSS = True
+    if params.MODEL == "donkey_rnn":
+        # donkeycar's layers, no batch norm; mse unless --turn_loss. Colour augmentation
+        # comes with the stacked-frame path, as for pilot_net_seq.
+        params.TURN_LOSS = args.turn_loss
+        params.BATCH_NORM = False
 
     if args.records_dir:
         if args.create_tf_record or args.no_tf_record:

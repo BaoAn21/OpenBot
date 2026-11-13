@@ -3,13 +3,17 @@
 How to go from new recordings to the two Autopilot Session models:
 
 - **fwd**: `donkey_memory` (default) or `cil_mobile_fast_memory`, drives forward (model
-  type CMDNAV_MEM on the phone)
+  type CMDNAV_MEM on the phone), `cil_mobile_fast` (CMDNAV, the single-frame baseline), or
+  `donkey_rnn` (CMDNAV_SEQ, for now only on the Autopilot Seq screen)
 - **bwd**: `cil_mobile_fast` (default), drives backward (model type CMDNAV, gets cmd 2), or
   `cil_mobile_fast_memory` or `donkey_memory_reverse` (model type CMDNAV_MEM)
 
 `cil_mobile_fast_memory` is cil_mobile_fast plus donkey_memory's memory of its last 3
 outputs. `donkey_memory_reverse` is donkey_memory with a tanh throttle instead of the
-sigmoid, so it can reverse (plain donkey_memory can't). Pick either with `--model`.
+sigmoid, so it can reverse (plain donkey_memory can't). `donkey_rnn` is donkeycar's rnn
+pilot with a cmd input: no memory of its own outputs, it sees the last frames instead (the
+current one and those ~100 and ~200 ms back, `--seq_offsets 0,3,6`). Pick any of them with
+`--model`.
 
 Everything runs from `policy/` in the conda env:
 
@@ -56,6 +60,8 @@ python train_fwdbwd.py bwd                           # backward model, all sessi
 python train_fwdbwd.py fwd --model cil_mobile_fast_memory   # forward, cil with memory
 python train_fwdbwd.py bwd --model cil_mobile_fast_memory   # backward, cil with memory
 python train_fwdbwd.py bwd --model donkey_memory_reverse    # backward, donkey with memory
+python train_fwdbwd.py fwd --model donkey_rnn               # forward, donkey over 3 frames
+python train_fwdbwd.py fwd --model cil_mobile_fast --sessions 7   # forward, single-frame baseline
 python train_fwdbwd.py fwd --sessions 1 3 4          # only these sessions
 python train_fwdbwd.py bwd --sessions 1 3 --num_epochs 60   # other options go to openbot.train
 ```
@@ -65,7 +71,8 @@ python train_fwdbwd.py bwd --sessions 1 3 --num_epochs 60   # other options go t
   `--build_only` builds without training.
 - Settings used: `donkey_memory --color_aug --mem_len 3`, `cil_mobile_fast --batch_norm
   --flip_aug`, `cil_mobile_fast_memory --batch_norm --flip_aug --mem_len 3`,
-  `donkey_memory_reverse --color_aug --mem_len 3`, all
+  `donkey_memory_reverse --color_aug --mem_len 3`, `donkey_rnn --seq_offsets 0,3,6`
+  (colour aug always, plain mse, `--turn_loss` and `--flip_aug` opt-in), all
   `--batch_size 128 --learning_rate 0.0003 --num_epochs 100 --early_stop 20`.
 - Training stops once val loss hasn't improved for 20 epochs (`--early_stop 20`), so
   100 epochs is only the upper limit. `best.tflite` is the best-val checkpoint either way.
@@ -96,9 +103,17 @@ python train_fwdbwd.py bwd --sessions 1 3 --num_epochs 60   # other options go t
   don't compare them with the plain bwd model's. Don't compare loss values between
   donkey_memory (mse) and cil_mobile_fast_memory (turn-weighted loss) either.
 - On the phone, cil_mobile_fast_memory and donkey_memory_reverse are added as CMDNAV_MEM; the
-  Autopilot Session backward spinner offers CMDNAV and CMDNAV_MEM models. The phone clamps
+  Autopilot Session spinners offer CMDNAV and CMDNAV_MEM models in both directions. The phone clamps
   throttle to >= 0 forward and <= 0 backward.
+- **donkey_rnn** has no memory, so its val numbers are honest and comparable between
+  donkey_rnn runs. On the phone it is a CMDNAV_SEQ model: drive it from the **Autopilot
+  Seq** screen (no takeover or logging there yet). If you rename the `.tflite`, keep
+  `_seq0-3-6` in the name: the screen reads the frame offsets from it and otherwise
+  assumes 0,2,4.
 - Put `checkpoints/best.tflite` on the phone (the checkpoint with the best val loss).
+  The end of the training log says whether it computes what the trained model does
+  (`match: PASS`, `stateless: PASS`); `python check_tflite.py models/<folder>` checks every
+  `.tflite` in a folder, renamed copies included.
 - Note the run in `policy/EXPERIMENTS.md`: sessions, metrics, robot result.
 
 ## 6. Autopilot runs: how the models drive, and your takeovers as data

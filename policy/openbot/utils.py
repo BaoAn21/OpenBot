@@ -125,7 +125,26 @@ def savefig(path):
 
 
 def generate_tflite(path, filename):
-    converter = tf.lite.TFLiteConverter.from_saved_model(os.path.join(path, filename))
+    model = tf.keras.models.load_model(os.path.join(path, filename), compile=False)
+    if any(isinstance(layer, tf.keras.layers.LSTM) for layer in model.layers):
+        # donkey_rnn. TFLite's own LSTM op (UNIDIRECTIONAL_SEQUENCE_LSTM) keeps its
+        # hidden and cell state between invoke() calls, so on the phone every stack would
+        # start from the previous one's state, where Keras starts each from zero - it
+        # matches on the first frame and drifts after. Unrolled (3 steps for donkey_rnn)
+        # the LSTM becomes plain ops with no state. Same weights, same math; it also
+        # converts without the static batch size the LSTM op needs. check_tflite.py
+        # tests exactly this: consecutive calls against the Keras model.
+        config = model.get_config()
+        for layer in config["layers"]:
+            if layer["class_name"] == "LSTM":
+                layer["config"]["unroll"] = True
+        unrolled = tf.keras.Model.from_config(config)
+        unrolled.set_weights(model.get_weights())
+        converter = tf.lite.TFLiteConverter.from_keras_model(unrolled)
+    else:
+        converter = tf.lite.TFLiteConverter.from_saved_model(
+            os.path.join(path, filename)
+        )
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
     tflite_model = converter.convert()
     return tflite_model

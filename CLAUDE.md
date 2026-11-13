@@ -135,6 +135,22 @@ donkeycar's. `train.DONKEY_MODELS` makes it train exactly like donkey_memory (no
 model: `train_fwdbwd.py bwd --model donkey_memory_reverse` (bwd memory records, `--color_aug`);
 on the phone a `CMDNAV_MEM` model in the backward spinner.
 
+**donkey rnn (`--model donkey_rnn`).** donkeycar's `rnn_lstm` pilot: the same small CNN on
+every frame of a stack (TimeDistributed, 100 features per frame), two LSTM(128), Dense
+128-64-10, linear output. Input is the seq records' channel stack `(h, w, 3 * seq_len)`,
+oldest first, unstacked inside the model, so `tfrecord_seq`, `augment_img_seq`, `--flip_aug`
+and the phone's `AutopilotSeq`/"Autopilot Seq" screen (CMDNAV_SEQ, offsets read from `_seq<tags>`
+in the file name) take it unchanged. cmd as in cil_mobile_fast: 16-16 MLP fused after the
+LSTMs, raw cmd before each later layer. In `train.MSE_MODELS`: no BN, plain MSE unless
+`--turn_loss`; colour aug always (the seq path). TFLite's own LSTM op keeps its state between
+`invoke()` calls (the phone carried it from frame to frame, matching Keras only on the first
+call), so `utils.generate_tflite` exports any model with an LSTM layer **unrolled**: plain ops,
+no state, same weights (everything else still converts from the saved model). `.tflite` files
+exported before 2026-11-13 have the bug; `python check_tflite.py --export <folder>` re-exports. `train_fwdbwd.py fwd --model donkey_rnn`
+(`--seq_offsets`, default `0,3,6`) builds `dataset/tfrecords_seq<offsets>/`. Forward only: a bwd
+folder holds several reverses and `tfrecord_seq` doesn't cut windows at gaps. No memory, so
+its val metrics aren't teacher-forced. Not wired into the Autopilot Session screen yet.
+
 **cil memory model (`--model cil_mobile_fast_memory`).** cil_mobile_fast (same CNN, cmd
 MLP, raw cmd before the later layers, linear output so it can reverse) plus donkey_memory's
 memory branch fused beside the cmd MLP and image features. Unlike donkey_memory it trains like
@@ -145,7 +161,8 @@ for either Autopilot Session direction: `train_fwdbwd.py fwd|bwd --model cil_mob
 fwd shares `tfrecords_mem<N>/` with donkey_memory; bwd builds `dataset/tfrecords_bwd_mem<N>/`
 (windows cut at gaps > 0.5 s, `split_direction.MAX_GAP_S`, as a recording's reverses share one
 folder) and passes it with `openbot.train --records_dir`. On the phone it is a `CMDNAV_MEM`
-model; `AutopilotSessionFragment` keeps a memory per direction, and both it and
+model; `AutopilotSessionFragment` takes a `CMDNAV` or `CMDNAV_MEM` model in either direction
+(a memory per direction for the latter), and both it and
 `AutopilotMemFragment` clamp throttle to >= 0 forward (<= 0 backward), since its output is
 linear. Same caveat: judge it closed loop.
 
@@ -154,7 +171,8 @@ in `dataset/fwdbwd/`, not in `train_data/test_data`: recordings go into `fwdbwd/
 `python split_direction.py` turns them into a numbered session
 (`raw/session_<N>/`, `{train,test}/{fwd,bwd}/session_<N>/`, random per-recording test split),
 and `python train_fwdbwd.py fwd|bwd [--sessions 1 3]` builds the records for that choice
-(`tfrecords_mem3/` fwd, `tfrecords/` bwd, each with a `manifest.txt`) and runs
+(`tfrecords_mem3/` fwd memory, `tfrecords_fwd/` fwd single-frame, `tfrecords/` bwd, each with a
+`manifest.txt`) and runs
 `openbot.train`. The user-facing how-to is `policy/FWDBWD.md`. `openbot.train` takes
 `--run_name` (model folder prefix; `train_fwdbwd.py` uses `fwd_s1-2-3` style names) and
 `--early_stop N` (stop after N epochs without a better val loss; off by default, `train_fwdbwd.py`
@@ -171,7 +189,10 @@ prediction) go in `dataset/fwdbwd/autopilot_runs/`; `python autopilot_log.py rep
 them (takeovers per minute, `autopilot_report.png`) and `extract` turns the trimmed human
 takeovers into an inbox recording, writing its own ctrlLog from autopilotLog (the phone's
 holds the models' commands and is timestamped late). `split_direction.py` parks a raw run in
-`parked/autopilot/`. `make_forward_only.py` sets every cmd to 0 - never run it on indicator data. `policy/EXPERIMENTS.md` logs every dataset and trained model (models/ and
+`parked/autopilot/`. `make_forward_only.py` sets every cmd to 0 - never run it on indicator data. `python check_tflite.py <model folders>` feeds real test frames to every `.tflite` in a folder
+one after another, as the phone does, and checks each against its Keras checkpoint (`match`)
+and that nothing carries over between calls (`stateless`); `train.py` runs it on `best.tflite`
+at the end of every run. `policy/EXPERIMENTS.md` logs every dataset and trained model (models/ and
 dataset/ are gitignored); add an entry for each new run.
 
 `policy/frontend` is a separate CRA app (own `package.json`): `npm start`, `npm run build`, `npm test` inside `policy/frontend`.

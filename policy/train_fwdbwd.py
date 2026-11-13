@@ -2,13 +2,18 @@
 
   fwd  donkey_memory (--color_aug), the default, or
        cil_mobile_fast_memory (--batch_norm --flip_aug); records in dataset/tfrecords_mem<N>/
+       or cil_mobile_fast (--batch_norm --flip_aug); records in dataset/tfrecords_fwd/
+       or donkey_rnn (frames --seq_offsets, default 0,3,6); records in
+       dataset/tfrecords_seq<offsets>/
   bwd  cil_mobile_fast (--batch_norm --flip_aug), the default, records in dataset/tfrecords/,
        or cil_mobile_fast_memory (--batch_norm --flip_aug) or donkey_memory_reverse
        (--color_aug), records in dataset/tfrecords_bwd_mem<N>/
 
 Pick the model with --model; cil_mobile_fast_memory is cil_mobile_fast plus donkey_memory's
 memory of its last --mem_len (default 3) outputs, donkey_memory_reverse is donkey_memory with
-a tanh throttle so it can reverse.
+a tanh throttle so it can reverse. donkey_rnn is donkeycar's rnn pilot (a CNN per frame, two
+LSTMs over a stack of frames) with a cmd input; forward only for now, since a backward
+folder holds several reverses and its windows would step from one into the next.
 
 The sessions come from dataset/fwdbwd/{train,test}/<fwd|bwd>/session_<N>/ (see
 split_direction.py). The records are rebuilt only when the choice of sessions or their
@@ -28,6 +33,7 @@ Usage (from policy/, conda env):
     python train_fwdbwd.py fwd --model cil_mobile_fast_memory
     python train_fwdbwd.py bwd --model cil_mobile_fast_memory
     python train_fwdbwd.py bwd --model donkey_memory_reverse
+    python train_fwdbwd.py fwd --model donkey_rnn
     python train_fwdbwd.py fwd --sessions 2 --build_only
     python train_fwdbwd.py fwd --num_epochs 60
 """
@@ -50,6 +56,9 @@ MODELS = {
     "fwd": {
         "donkey_memory": ["--color_aug"],
         "cil_mobile_fast_memory": ["--batch_norm", "--flip_aug"],
+        "cil_mobile_fast": ["--batch_norm", "--flip_aug"],
+        "pilot_net": ["--batch_norm", "--flip_aug"],
+        "donkey_rnn": [],
     },
     "bwd": {
         "cil_mobile_fast": ["--batch_norm", "--flip_aug"],
@@ -85,9 +94,13 @@ def folders(root, split, direction, number):
     return sorted(os.listdir(d)) if os.path.isdir(d) else []
 
 
-def manifest(root, direction, numbers, mem_len):
-    """mem_len is 0 for the plain backward records."""
-    lines = [f"# {direction}" + (f", mem_len {mem_len}" if mem_len else "")]
+def manifest(root, direction, numbers, mem_len, seq_tag=""):
+    """mem_len is 0 and seq_tag empty for the plain backward records."""
+    lines = [
+        f"# {direction}"
+        + (f", mem_len {mem_len}" if mem_len else "")
+        + (f", seq {seq_tag}" if seq_tag else "")
+    ]
     for split, _, _ in SPLITS:
         for n in numbers:
             lines += [
@@ -183,6 +196,15 @@ def build_fwd(stage, out_dir, mem_len, max_gap_s=None):
         )
 
 
+def build_seq(stage, out_dir, offsets):
+    from openbot import tfrecord_seq
+
+    for _, data_dir, name in SPLITS:
+        tfrecord_seq.convert_dataset(
+            os.path.join(stage, data_dir), out_dir, name, offsets, verbose=False
+        )
+
+
 def check_bwd(path):
     """The backward model is fed cmd 2 and must never learn forward throttle, nor
     remember any."""
@@ -204,7 +226,8 @@ def check_bwd(path):
         raise SystemExit(f"{path}: {bad} examples without cmd 2 and throttle < 0")
 
 
-def build_bwd(stage, out_dir):
+def build_plain(stage, out_dir, check=None):
+    """Single-frame records; check (check_bwd) runs on each file when given."""
     from openbot import tfrecord
 
     for _, data_dir, name in SPLITS:
@@ -217,7 +240,8 @@ def build_bwd(stage, out_dir):
         missing = log.getvalue().count("cannot be found")
         if missing:
             raise SystemExit(f"{data_dir}: {missing} images not found")
-        check_bwd(os.path.join(out_dir, name))
+        if check:
+            check(os.path.join(out_dir, name))
 
 
 def build_bwd_mem(stage, out_dir, mem_len):
@@ -231,10 +255,15 @@ def build_bwd_mem(stage, out_dir, mem_len):
         check_bwd(os.path.join(out_dir, name))
 
 
-def records_dir(dataset_dir, direction, mem_len):
-    """mem_len is 0 for the plain backward records."""
+def records_dir(dataset_dir, direction, mem_len, seq_tag=""):
+    """mem_len is 0 and seq_tag empty for the plain backward records."""
+    if seq_tag:
+        return os.path.join(dataset_dir, f"tfrecords_seq{seq_tag}")
     if direction == "fwd":
-        return os.path.join(dataset_dir, f"tfrecords_mem{mem_len}")
+        if mem_len:
+            return os.path.join(dataset_dir, f"tfrecords_mem{mem_len}")
+        # Apart from the plain backward records in tfrecords/, as the memory ones are.
+        return os.path.join(dataset_dir, "tfrecords_fwd")
     if mem_len:
         # Apart from the forward memory records, so switching direction never
         # rebuilds (or trains on) the other one's.
@@ -256,7 +285,8 @@ def main():
     )
     parser.add_argument(
         "--model",
-        help="fwd: donkey_memory (default) or cil_mobile_fast_memory; "
+        help="fwd: donkey_memory (default), cil_mobile_fast_memory, cil_mobile_fast, pilot_net or "
+        "donkey_rnn; "
         "bwd: cil_mobile_fast (default), cil_mobile_fast_memory or donkey_memory_reverse",
     )
     parser.add_argument(
@@ -264,6 +294,12 @@ def main():
         type=int,
         default=3,
         help="memory length of a memory model (default 3)",
+    )
+    parser.add_argument(
+        "--seq_offsets",
+        default="0,3,6",
+        help="frames of a donkey_rnn stack, back from the current one (default 0,3,6, "
+        "~0, 100 and 200 ms)",
     )
     parser.add_argument(
         "--build_only", action="store_true", help="build the records, don't train"
@@ -286,6 +322,16 @@ def main():
     if model not in MODELS[direction]:
         parser.error(f"{direction} trains {' or '.join(MODELS[direction])}, not {model}")
     mem_len = args.mem_len if "memory" in model else 0
+    offsets = None
+    seq_tag = ""
+    if model == "donkey_rnn":
+        from openbot import tfrecord_seq
+
+        try:
+            offsets = tfrecord_seq.parse_offsets(args.seq_offsets)
+        except ValueError as err:
+            parser.error(str(err))
+        seq_tag = tfrecord_seq.offsets_tag(offsets)
 
     available = sessions_in(root, direction)
     numbers = sorted(set(args.sessions)) if args.sessions else available
@@ -300,8 +346,8 @@ def main():
     if empty_test:
         print(f"note: sessions {empty_test} have no {direction} test data")
 
-    out_dir = records_dir(dataset_dir, direction, mem_len)
-    wanted = manifest(root, direction, numbers, mem_len)
+    out_dir = records_dir(dataset_dir, direction, mem_len, seq_tag)
+    wanted = manifest(root, direction, numbers, mem_len, seq_tag)
     manifest_path = os.path.join(out_dir, "manifest.txt")
     have = open(manifest_path).read() if os.path.isfile(manifest_path) else None
     if args.rebuild or have != wanted:
@@ -309,12 +355,16 @@ def main():
         with contextlib.suppress(FileNotFoundError):
             os.remove(manifest_path)  # half-built records must never look current
         with staged(root, direction, numbers) as stage:
-            if direction == "fwd":
+            if offsets:
+                build_seq(stage, out_dir, offsets)
+            elif direction == "fwd" and mem_len:
                 build_fwd(stage, out_dir, mem_len)
+            elif direction == "fwd":
+                build_plain(stage, out_dir)
             elif mem_len:
                 build_bwd_mem(stage, out_dir, mem_len)
             else:
-                build_bwd(stage, out_dir)
+                build_plain(stage, out_dir, check=check_bwd)
         with open(manifest_path, "w") as f:
             f.write(wanted)
     else:
@@ -327,7 +377,9 @@ def main():
     cmd += ["--model", model] + MODELS[direction][model] + COMMON_ARGS
     if mem_len:
         cmd += ["--mem_len", str(mem_len)]
-    if direction == "bwd" and mem_len:
+    if offsets:
+        cmd += ["--seq_offsets", ",".join(str(o) for o in offsets)]
+    if (direction == "bwd" and mem_len) or (direction == "fwd" and not mem_len and not offsets):
         cmd += ["--records_dir", out_dir]
     cmd += train_extra  # later options win in argparse
     print(" ".join(cmd[1:]))

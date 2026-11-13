@@ -468,3 +468,66 @@ def donkey_memory_reverse(
     x = tf.keras.layers.concatenate([steering, throttle])
 
     return tf.keras.Model(name="donkey_memory_reverse", inputs=inputs, outputs=x)
+
+
+def donkey_rnn(img_width, img_height, bn=False, policy="autopilot", seq_len=3):
+    """donkeycar's "rnn" pilot (rnn_lstm in donkeycar/parts/keras.py) plus a cmd input.
+
+    The same small CNN runs on every frame of the stack (TimeDistributed), each frame
+    narrowed to 100 features, and two LSTMs combine them over time - so motion is read
+    from features of whole frames, not from the first convolution as in pilot_net_seq.
+    The layers are donkeycar's: dropout and no batch norm (bn is ignored), a linear
+    output, so it can predict reverse.
+
+    The input is the stack the seq records and AutopilotSeq on the phone use,
+    (height, width, 3 * seq_len) with the frames oldest first, unstacked inside the
+    model to donkeycar's (seq_len, height, width, 3). The cmd goes in the way
+    cil_mobile_fast takes it: its own 16-16 MLP fused with the LSTM output, then the
+    raw value again before each later layer.
+
+    An LSTM only converts to TFLite with a fixed batch size; utils.generate_tflite
+    handles that.
+    """
+    if policy != "autopilot":
+        raise Exception("donkey_rnn only supports the autopilot policy")
+
+    drop = 0.3
+    drop2 = 0.1
+    td = tf.keras.layers.TimeDistributed
+
+    img_in = tf.keras.Input(
+        shape=(img_height, img_width, 3 * seq_len), name="img_input"
+    )
+    x = tf.keras.layers.Reshape((img_height, img_width, seq_len, 3))(img_in)
+    x = tf.keras.layers.Permute((3, 1, 2, 4))(x)
+    for filters, kernel, stride in ((24, 5, 2), (32, 5, 2), (32, 3, 2), (32, 3, 1)):
+        x = td(
+            tf.keras.layers.Conv2D(
+                filters, (kernel, kernel), strides=(stride, stride), activation="relu"
+            )
+        )(x)
+        x = td(tf.keras.layers.Dropout(drop))(x)
+    x = td(tf.keras.layers.MaxPooling2D(pool_size=(2, 2)))(x)
+    x = td(tf.keras.layers.Flatten())(x)
+    x = td(tf.keras.layers.Dense(100, activation="relu"))(x)
+    x = td(tf.keras.layers.Dropout(drop))(x)
+
+    x = tf.keras.layers.LSTM(128, return_sequences=True, name="LSTM_seq")(x)
+    x = tf.keras.layers.Dropout(drop2)(x)
+    x = tf.keras.layers.LSTM(128, return_sequences=False, name="LSTM_fin")(x)
+    x = tf.keras.layers.Dropout(drop2)(x)
+
+    cmd_in = tf.keras.Input(shape=(1,), name="cmd_input")
+    cmd = create_mlp(1, 16, 16, name="cmd")(cmd_in)
+    x = tf.keras.layers.concatenate([cmd, x])
+
+    x = tf.keras.layers.Dense(128, activation="relu")(x)
+    x = tf.keras.layers.Dropout(drop2)(x)
+    x = tf.keras.layers.concatenate([cmd_in, x])
+    x = tf.keras.layers.Dense(64, activation="relu")(x)
+    x = tf.keras.layers.concatenate([cmd_in, x])
+    x = tf.keras.layers.Dense(10, activation="relu")(x)
+    x = tf.keras.layers.concatenate([cmd_in, x])
+    x = tf.keras.layers.Dense(2, activation="linear")(x)
+
+    return tf.keras.Model(name="donkey_rnn", inputs=(img_in, cmd_in), outputs=x)
