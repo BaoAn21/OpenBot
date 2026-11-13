@@ -49,10 +49,10 @@ import org.openbot.vehicle.Control;
 import timber.log.Timber;
 
 /**
- * A full autopilot run on a track that has to be driven both ways: one model drives forward
- * (a memory model, {@code CMDNAV_MEM}: donkey_memory or cil_mobile_fast_memory) and another backward ({@code CMDNAV}, e.g.
- * cil_mobile_fast, or {@code CMDNAV_MEM}, e.g. cil_mobile_fast_memory). Both are loaded up front so
- * a switch is instant, but only the active one runs on a frame.
+ * A full autopilot run on a track that has to be driven both ways: one model drives forward and
+ * another backward, each either a single-frame model ({@code CMDNAV}, e.g. cil_mobile_fast) or a
+ * memory model ({@code CMDNAV_MEM}, e.g. donkey_memory, cil_mobile_fast_memory). Both are loaded up
+ * front so a switch is instant, but only the active one runs on a frame.
  *
  * <p>Which one drives follows the indicator: REVERSE means backward, anything else forward. The
  * on-screen button, the gamepad's triangle and the phone/web controllers all switch it that way,
@@ -74,10 +74,9 @@ import timber.log.Timber;
  * <p>The Logging switch (or the gamepad's x) records the run with a {@link SessionLog}: the data
  * logger's files for every inferred frame, plus who drove it and what the model predicted.
  *
- * <p>The forward spinner only offers CMDNAV_MEM models, the backward one CMDNAV and CMDNAV_MEM
- * models. Forward needs the memory input; backward needs a model that can reverse - a donkey_memory
- * model there would only stand still, its sigmoid throttle clamped to 0; use donkey_memory_reverse
- * (tanh throttle) instead.
+ * <p>Both spinners offer CMDNAV and CMDNAV_MEM models. Backward needs a model that can reverse - a
+ * donkey_memory model there would only stand still, its sigmoid throttle clamped to 0; use
+ * donkey_memory_reverse (tanh throttle) instead.
  */
 public class AutopilotSessionFragment extends CameraFragment {
 
@@ -104,24 +103,25 @@ public class AutopilotSessionFragment extends CameraFragment {
     /** Null until something sets the indicator from the camera; switching is manual until then. */
     private IndicatorSource autoIndicator = null;
 
-    private AutopilotMem forwardNet;
-    /** An {@link Autopilot} (CMDNAV) or an {@link AutopilotMem} (CMDNAV_MEM). */
+    /** An {@link Autopilot} (CMDNAV) or an {@link AutopilotMem} (CMDNAV_MEM), per direction. */
+    private Network forwardNet;
+
     private Network backwardNet;
     private Crop forwardCrop;
     private Crop backwardCrop;
 
     /**
-     * The forward model's previous outputs, {@code [s, t] * memLen} oldest first, as in {@link
-     * AutopilotMemFragment}. Only touched on the inference thread.
+     * A forward memory model's previous outputs, {@code [s, t] * memLen} oldest first, as in {@link
+     * AutopilotMemFragment}; null for a CMDNAV one. Only touched on the inference thread.
      */
     private float[] forwardMemory;
 
-    /** The same for a backward memory model; null for a CMDNAV one. */
+    /** The same for the backward model. */
     private float[] backwardMemory;
 
     /**
-     * The memories as last put on screen ("" for a backward model without one); the overlay redraws
-     * from them on indicator changes.
+     * The memories as last put on screen ("" for a model without one); the overlay redraws from
+     * them on indicator changes.
      */
     private volatile String forwardMemoryText = "";
 
@@ -198,7 +198,6 @@ public class AutopilotSessionFragment extends CameraFragment {
         setNumThreads(preferencesManager.getNumThreads());
         binding.threads.setText(String.valueOf(getNumThreads()));
         binding.cameraToggle.setOnClickListener(v -> toggleCamera());
-        forwardMemoryText = getString(R.string.memory_info_empty);
         updateIndicatorInfo();
 
         if (vehicle.getConnectionType().equals("USB")) {
@@ -209,14 +208,13 @@ public class AutopilotSessionFragment extends CameraFragment {
             binding.usbToggle.setVisibility(View.GONE);
         }
 
-        List<String> forwardModels =
-                getModelNames(
-                        f -> f.type.equals(Model.TYPE.CMDNAV_MEM) && f.pathType != Model.PATH_TYPE.URL);
-        List<String> backwardModels =
+        List<String> sessionModels =
                 getModelNames(
                         f ->
                                 (f.type.equals(Model.TYPE.CMDNAV) || f.type.equals(Model.TYPE.CMDNAV_MEM))
                                         && f.pathType != Model.PATH_TYPE.URL);
+        List<String> forwardModels = sessionModels;
+        List<String> backwardModels = sessionModels;
         if (forwardModels.isEmpty() || backwardModels.isEmpty()) {
             Toast.makeText(
                             requireContext().getApplicationContext(),
@@ -374,16 +372,25 @@ public class AutopilotSessionFragment extends CameraFragment {
             if (forwardNet != null) forwardNet.close();
             forwardNet = null;
             forwardCrop = null;
+            forwardMemory = null;
+            forwardMemoryText = "";
             if (forwardModel != null) {
                 try {
                     Timber.d(
                             "Creating forward autopilot (model=%s, device=%s, numThreads=%d)",
                             forwardModel, device, numThreads);
-                    AutopilotMem net = new AutopilotMem(requireActivity(), forwardModel, device, numThreads);
-                    forwardCrop = new Crop(net, frameWidth, frameHeight, sensorOrientation);
-                    forwardMemory = new float[2 * net.getMemLen()];
-                    showMemory(false, forwardMemory.clone());
-                    forwardNet = net;
+                    if (forwardModel.type.equals(Model.TYPE.CMDNAV_MEM)) {
+                        AutopilotMem net =
+                                new AutopilotMem(requireActivity(), forwardModel, device, numThreads);
+                        forwardCrop = new Crop(net, frameWidth, frameHeight, sensorOrientation);
+                        forwardMemory = new float[2 * net.getMemLen()];
+                        showMemory(false, forwardMemory.clone());
+                        forwardNet = net;
+                    } else {
+                        Autopilot net = new Autopilot(requireActivity(), forwardModel, device, numThreads);
+                        forwardCrop = new Crop(net, frameWidth, frameHeight, sensorOrientation);
+                        forwardNet = net;
+                    }
                 } catch (IllegalArgumentException | IOException e) {
                     showNetworkError(e);
                 }
