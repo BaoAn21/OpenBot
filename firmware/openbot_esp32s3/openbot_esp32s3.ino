@@ -83,7 +83,7 @@ Arduino_DataBus *bus = new Arduino_ESP32LCD8(
     7 /* DC */, 6 /* CS */, 8 /* WR */, 9 /* RD */,
     39, 40, 41, 42, 45, 46, 47, 48 /* D0..D7 */);
 Arduino_GFX *gfx = new Arduino_ST7789(
-    bus, 5 /* RST */, 1 /* rotation: landscape */, true /* IPS */, 170, 320,
+    bus, 5 /* RST */, 3 /* rotation: landscape, upside down (board mounted inverted) */, true /* IPS */, 170, 320,
     35, 0, 35, 0 /* col/row offsets */);
 
 //------------------------------------------------------//

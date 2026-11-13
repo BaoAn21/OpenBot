@@ -192,6 +192,9 @@ stops, and all indicators and the reverse light are switched off; the screen the
 
 ## Screen
 
+The board is mounted upside down, so the screen is drawn rotated 180° (rotation `3` in the
+`Arduino_ST7789` constructor; use `1` for a board mounted the right way up).
+
 - Left and right edges: three amber chevrons per side that light up one after another
   (sequential turn signal); both sides together = hazard lights.
 - Top of the centre panel: REVERSE badge, solid white while reversing.
