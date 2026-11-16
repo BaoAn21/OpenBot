@@ -262,6 +262,45 @@ def build_windows(timeline_ids, rows, offsets):
     return windows
 
 
+def read_frame_timestamps(session_dir):
+    """Frame id -> timestamp (ns), from the folder's rgbFrames.txt."""
+    timestamps = {}
+    path = os.path.join(session_dir, "sensor_data", "rgbFrames.txt")
+    if not os.path.isfile(path):
+        return timestamps
+    with open(path) as f:
+        f.readline()  # discard header
+        for line in f:
+            fields = line.strip().split(",")
+            if len(fields) >= 2:
+                timestamps[int(fields[1])] = int(fields[0])
+    return timestamps
+
+
+def split_timeline(timeline_ids, timestamps, max_gap_s):
+    """The timeline cut into runs wherever two consecutive frames are more than max_gap_s
+    apart (or a frame has no timestamp), so no window steps from one run into the next.
+
+    A backward folder holds a recording's reverses one after another; without the cut a
+    window at the start of a reverse would reach into the end of the previous one.
+    """
+    runs = []
+    current = []
+    for frame_id in timeline_ids:
+        ts = timestamps.get(frame_id)
+        if current and (
+            ts is None
+            or timestamps.get(current[-1]) is None
+            or (ts - timestamps[current[-1]]) / 1e9 > max_gap_s
+        ):
+            runs.append(current)
+            current = []
+        current.append(frame_id)
+    if current:
+        runs.append(current)
+    return runs
+
+
 def make_example(session_dir, frame_ids, label_row):
     images_dir = os.path.join(session_dir, "images")
     feature = {}
@@ -307,8 +346,12 @@ def convert_dataset(
     trim_stationary=False,
     keep_stationary=DEFAULT_KEEP_STATIONARY,
     verbose=True,
+    max_gap_s=None,
 ):
-    """Write one tfrecord covering every session under data_dir."""
+    """Write one tfrecord covering every session under data_dir. With max_gap_s
+    (seconds) each session's timeline is first cut at gaps longer than that
+    (split_timeline), and every run starts its windows afresh, padded like a session
+    start."""
     os.makedirs(tfrecords_dir, exist_ok=True)
     out_path = os.path.join(tfrecords_dir, tfrecords_name)
 
@@ -325,7 +368,16 @@ def convert_dataset(
                     print(f"  skipping {dataset}/{session}: no usable labels")
                     continue
 
-                windows = build_windows(timeline, rows, offsets)
+                if max_gap_s is None:
+                    windows = build_windows(timeline, rows, offsets)
+                else:
+                    timestamps = read_frame_timestamps(session_dir)
+                    windows = [
+                        window
+                        for run in split_timeline(timeline, timestamps, max_gap_s)
+                        for window in build_windows(run, rows, offsets)
+                    ]
+                    windows.sort(key=lambda w: w[1][0])  # back in frame order
                 padded = sum(1 for ids, _ in windows if ids[0] == ids[1])
                 for frame_ids, label_row in windows:
                     writer.write(

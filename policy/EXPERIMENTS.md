@@ -23,6 +23,12 @@ Last updated: 2026-10-25.
 
 ## Datasets
 
+**2026-11-16: new base, camera tilted a little up at the front.** Everything recorded before
+(the table below: `fwdbwd/` sessions 1-11, the autopilot runs, `_other_sessions/`) was moved
+to `dataset/_archive/old_base_2026-11-16/` and the records (`tfrecords*/`) deleted;
+`fwdbwd/` starts again at session 1. The models in `models/` up to this date were trained on
+the old camera angle, so their numbers don't carry over to the new data.
+
 | Folder (under `policy/dataset/`) | Recorded | Sessions train / test | Frames train / test | cmd | Notes |
 |---|---|---|---|---|---|
 | `_other_sessions/train_data/my_dataset_1`, `_other_sessions/test_data/my_dataset_2` | 2026-08-28, 09-18, 09-23 | 66 / 18 | 5,871 total after forward-only (5,397 reverse frames removed) | 0 only (was 1 = reverse) | Forward/reverse driving on the small track. The 09-23 sessions were reverse-only and are empty after `make_forward_only.py`. Originals kept as `*.with_reverse`; `make_forward_only.py --restore` brings them back. |
@@ -33,6 +39,9 @@ Last updated: 2026-10-25.
 | `fwdbwd/` session 1 | 2026-10-17, 10-19, daylight | 71 recordings, test = every 5th (14) | fwd 9,534 / 2,455, bwd 3,405 / 736 | fwd 0, bwd 2 | Autopilot Session data: forward and backward driving, split by `split_direction.py` (see `FWDBWD.md`). Was `fwdbwd_session_1`. 2 empty recordings of 10-17 (`123514`, `123631`) are in `_other_sessions/empty_sessions/`. |
 | `fwdbwd/` session 2 | 2026-10-20 evening | 47 recordings, test = every 5th (9) | fwd 3,638 / 1,199, bwd 2,010 / 532 | fwd 0, bwd 2 | 28 recordings (`203857`-`204510`) under warm yellow lamps (red/blue ~7, half the brightness), 19 neutral. Was `fwdbwd_session_2`. |
 | `fwdbwd/` session 3 | 2026-10-25 late morning | 46 recordings, test = random 20%, seed 0 (9) | fwd 2,831 frames in 32 runs (2,236 / 595), bwd 898 / 302 | fwd 0, bwd 2 | Neutral light. |
+| `fwdbwd/` session 8 | 2026-11-13 evening | 2 takeover recordings (`autopilot_log.py extract` of runs `213611` + `213634`), no test | fwd 338 frames in 16 runs, bwd 239 | fwd -1/0/1, bwd 2 | Recovery data: the human takeovers while `fwd_seq_turn_loss_13_11_seq0-3-6` (rnn, turn loss) and `bwd_seq0-3-6` (rnn) drove, 32 takeovers, trimmed 0.3 s each end. Meant to be trained together with 4-7, not alone. |
+| `fwdbwd/` session 9 | 2026-11-14 morning | 18 forward recordings, test = random 20%, seed 0 (4) | fwd 1,416 / 408, no bwd | fwd -1 (1,110), 0 (286), 1 (428) | Clean laps, mostly with the left indicator on. |
+| `fwdbwd/` session 10 | 2026-11-14 morning | 10 takeover recordings (`autopilot_log.py extract` of runs `072248`-`072703`, `072308` empty and skipped), `--test_fraction 0` | fwd 285 frames in 12 runs, no bwd | fwd -1 (197), 1 (88) | Recovery data: 13 takeovers while `turnlost_fwd_seq0-3-6` (rnn turn loss, s4-8) and `rnn_seq0-3-6` (plain rnn, s4-7) drove. Train together with 4-9. |
 
 Frames for fwdbwd are images per split folder; the memory records drop the first 3 frames of
 every forward run. Records for sessions 1 + 2 + 3 (2026-10-25): fwd 14,892 / 4,111 examples,
@@ -88,6 +97,123 @@ as in `logs/log.csv` (counting from 0).
 | `openbot_cil_mobile_fast_lr0.0003_bz128_bn_flip_fwdbwd1` | 10-20 | cil_mobile_fast, BN, `--flip_aug` (cmd 2 kept on flips) | session 1 bwd (3,405 / 736) | F1 | 80 | 0.519 / 0.769 / 0.865 / 0.197 | Not recorded. |
 | `openbot_donkey_memory_lr0.0003_bz128_mem3_color` | 10-21 | as `_fwdbwd1` | sessions 1 + 2 fwd (12,734 / 3,534) | F12 | 17 | 0.532 / 0.900 / 0.636 / 0.115 | Not recorded. |
 | `openbot_cil_mobile_fast_lr0.0003_bz128_bn_flip` | 10-21 | as `_fwdbwd1` | sessions 1 + 2 bwd (5,415 / 1,268) | F12 | 65 | 0.516 / 0.728 / 0.862 / 0.209 | Not recorded. |
+
+### fwd_s4-5-6-7-8-9-10_donkey_3d_lr0.0003_bz128_bn_flip_cmd_seq0-3-6, 2026-11-14
+- Command: `python train_fwdbwd.py fwd --model donkey_3d --sessions 4 5 6 7 8 9 10 --flip_aug --cmd_aug`
+- Git commit: 80f682d2, with uncommitted changes (donkey_3d itself is uncommitted)
+- Model: donkeycar's Keras3D_CNN (3D convs written as exact 2D equivalents for TFLite 2.4)
+  plus cil_mobile_fast's cmd head; plain MSE; BN always.
+- Trained on: fwd sessions 4-10 (`tfrecords_seq0-3-6`, shared with donkey_rnn). Test: the 4,768
+  seq test frames of those sessions.
+- Best val epoch 46 of 67 (early stop): val_loss 0.0362 (rnn same data 0.0467), val angle 0.459,
+  direction 0.896, throttle<0.1 0.464, MAE 0.141. `best.tflite` passes check_tflite.
+- Offline vs `fwd_s4-5-6-7-8-9-10_donkey_rnn_..._flip_cmd_seq0-3-6` (same test frames):
+  steering MAE 38 vs 44 /255, corr 0.90 vs 0.86. Phantom turns (straight frames steered >100)
+  3/0/1% vs 10/2/15% for indicator left/off/right. Under-steers hard turns more: mean |steer|
+  145 vs rnn 164 vs labels 196. Indicator pull -9/+11 vs -32/+36 (`--cmd_aug` weakened it).
+- Replay of the rnn's 9 takeovers of 2026-11-14 (stacks from the logged crops; the rnn replay
+  matched the phone within 2): the 3D model would not have saved them - near-zero steering
+  where the user went to +/-220, wrong side on 2.
+- Robot test: not yet.
+- Conclusion / next step: first model that is clearly better than the rnn offline, and cures the
+  phantom turns; the remaining fault is under-steering at hard turns/obstacles, which is what
+  `--turn_loss` targets.
+
+### fwd_s4-5-6-7_cil_mobile_fast_cat_lr0.0003_bz128_bn_flip, 2026-11-15 (turn-weighted loss)
+- Command: `python train_fwdbwd.py fwd --model cil_mobile_fast_cat --sessions 4 5 6 7`
+- Git commit: 80f682d2, with uncommitted changes (cil_mobile_fast_cat itself is uncommitted)
+- Model: cil_mobile_fast with steering as 21 softmax bins (decoded in the graph: argmax bin
+  and its neighbours) and a linear throttle. Loss: Gaussian soft target (sigma 1 bin),
+  cross-entropy + 10 x throttle^2, **times cil's turn weight w^2** (the first version of the
+  loss, `sq_weighted_ce_angle`, since replaced by the unweighted `ce_angle`).
+- Trained on: fwd sessions 4-7 (`tfrecords_fwd`), the same records and test frames (4,360) as
+  `cil_13_11`.
+- Best val epoch 45 of 66 (early stop): val angle 0.178, direction 0.544, throttle<0.1 0.465,
+  MAE 0.247 (cil_13_11: 0.269 / 0.641 / 0.398 / 0.195). Val loss rises from epoch 45 while the
+  metrics keep improving, so best-val is worse than last (last: 0.203 / 0.563 / 0.483 / 0.211).
+- Offline vs `cil_13_11` (same test frames): steering MAE 0.364 best-val / 0.289 last vs 0.237;
+  straights 0.496 / 0.399 vs 0.294; turns 0.231 / 0.194 vs 0.192; wrong-way errors > 0.5
+  22% / 11% vs 7%; throttle MAE 0.130 / 0.134 vs 0.152 (better).
+- Why: it **never predicts the three middle bins (-0.1, 0, +0.1)**, though 39% of the test frames
+  (1,704) are labelled straight. w^2 is 0.0025 straight vs up to 4.2 on a hard turn, so the
+  straight bins got no signal; regression can still average to ~0, classes can't.
+- Robot test: not done.
+- Conclusion / next step: failed because of the weight, not the bins (turns ~equal to cil).
+  Retrain with the unweighted `ce_angle`, as donkeycar trains its categorical model. Folder
+  renamed to `..._flip_turnweight`.
+
+### fwd_s4-5-6-7_cil_mobile_fast_cat_lr0.0003_bz128_bn_flip, 2026-11-15 (unweighted loss)
+- Command: `python train_fwdbwd.py fwd --model cil_mobile_fast_cat --sessions 4 5 6 7`
+- Git commit: 80f682d2, with uncommitted changes (cil_mobile_fast_cat itself is uncommitted)
+- Model: as the run above; loss `ce_angle`: soft-target cross-entropy + 10 x throttle^2, no
+  turn weight.
+- Trained on: fwd sessions 4-7 (`tfrecords_fwd`), same 4,360 test frames as `cil_13_11`.
+- Best val epoch 37 of 58 (early stop): val angle 0.457, direction 0.870, throttle<0.1 0.507,
+  MAE 0.161 (cil_13_11: 0.269 / 0.641 / 0.398 / 0.195). Last: 0.430 / 0.826 / 0.471 / 0.165.
+- Offline vs `cil_13_11` (best-val / last vs cil): steering MAE 0.196 / 0.201 vs 0.237;
+  straights 0.143 / 0.171 vs 0.294; turns (|s| >= 0.3) 0.228 / 0.215 vs 0.192; hard turns
+  (>= 0.7) 0.227 / 0.194 vs 0.175, mean |steer| there 0.73 / 0.79 vs 0.79 (labels 0.91);
+  phantom turns (straight frames steered > 0.4) 16% / 15% vs 25%; wrong-way > 0.5 4.8% / 6.2%
+  vs 6.6%; throttle MAE 0.126 / 0.128 vs 0.152. The predicted bins now follow the label
+  histogram, straight bin included.
+- Ties: ~40% of frames have their top two bins within 0.02, but almost all are neighbours
+  (top two > 3 bins apart: 2.3% best-val, 0.7% last), so a flip moves steering ~0.1.
+  check_tflite passes on all four files.
+- Robot test 2026-11-15 (`cate_please` = last.tflite, Session logs `autopilot_20261115_*`,
+  with the bwd cat below): 26.1 takeovers/min fwd over all 20 runs (15.8/min in the one long
+  run, 2m18s; the 19 short runs each start just before the same left turn). Nearly every
+  takeover is that left turn under-steered: model -0..-100 before you take over, you -180..-255.
+  Replaying the logged crops reproduces the phone (mean diff 4/255), so no export bug. Where you
+  steered > 150 (964 frames, you mean 249) the model said 113: its probability peaks at the
+  moderate bins (+0.4..+0.6), only 0.39 on the hard ones - it has hardly seen full lock
+  recoveries, which you need because it arrives late. No better than the rnn runs (18-25/min).
+- Conclusion / next step: best offline forward model so far on these sessions, mainly from
+  straights; hard turns still a little behind cil. Judge by a logged Session run vs
+  `cil_13_11` (takeovers per minute).
+
+### fwd_s4-5-6-7-8-10-11_cil_mobile_fast_cat_lr0.0003_bz128_bn_flip, 2026-11-15
+- Command: `python train_fwdbwd.py fwd --model cil_mobile_fast_cat --sessions 4 5 6 7 8 10 11`
+- Git commit: 80f682d2, with uncommitted changes
+- Trained on: fwd sessions 4-7 plus the takeover sessions 8, 10, 11 (11 = takeovers of the
+  cat models on 2026-11-15, `--test_fraction 0`; 1,180 takeover frames, 5% of the data). Same
+  4,360 test frames as before (takeover sessions have no test).
+- Early stop after 28 epochs, best val epoch 7: val angle 0.422, direction 0.991, throttle<0.1
+  0.191, MAE 0.255. Train loss still falling; val loss (cross-entropy) bottoms early for this
+  model, so the early stop cut it short.
+- Offline vs s4-7 cat last / cil_13_11: best-val predicts ~straight everywhere (hard turns |s|
+  0.27, turn MAE 0.553) - unusable. last: steering MAE 0.262 (turns 0.388 vs 0.215), throttle
+  bias **+67/255** (s4-7 cat +4): the takeover sessions' throttle is median 219-238, often 255
+  (you speed up when you take over), vs ~120 in the laps.
+- Pre-takeover frames of 2026-11-15 (313 model-driven frames in the 0.6 s before a takeover
+  where you steered > 120, not in training; you then steered 184 on average): model |steering|
+  cil_13_11 163, cat s4-7 last (the one on the car) 82, this run's last 146.
+- Robot test: not done; not worth it as is (best-val straight, last too fast).
+- Conclusion / next step: train to the end (`--early_stop 0`), and keep the takeovers' throttle
+  from teaching speed. cil_13_11 already steers that turn twice as hard as the cat model did.
+
+### bwd_s1-2-3-4-5-6-7-8_cil_mobile_fast_cat_lr0.0003_bz128_bn_flip, 2026-11-15
+- Command: `python train_fwdbwd.py bwd --model cil_mobile_fast_cat` (all sessions, 1-8; a first
+  attempt died at epoch 1 on a cuBLAS init error, GPU memory held elsewhere; folder removed)
+- Git commit: 80f682d2, with uncommitted changes (cil_mobile_fast_cat itself is uncommitted)
+- Model: as the fwd cat run, unweighted `ce_angle`.
+- Trained on: bwd sessions 1-8 (`tfrecords`, rebuilt: 3,411 test frames, 1,570 of them from
+  sessions 1-3). Sessions 4-8 reverse slower than 1-3 (test throttle median -222 vs -255).
+- Best val epoch 44 of 65 (early stop): val angle 0.541, direction 0.913, throttle<0.1 0.410,
+  MAE 0.189. Last: 0.534 / 0.918 / 0.423 / 0.199.
+- Offline vs `bwd_25_10` (cil, sessions 1-3, best-val) - **not the same training data**. On the
+  s1-3 test frames (both trained on s1-3): steering MAE cat best-val 0.259 vs cil 0.350;
+  straights 0.323 vs 0.907 (cil steers near full lock on most frames); turns 0.225 vs 0.118,
+  hard turns 0.200 vs 0.064 (mean |steer| there 0.83 vs 0.97, labels 0.98); wrong-way 13.9% vs
+  27.8%; throttle MAE 0.124 vs 0.086. On s4-8 (cil never saw them): steering MAE 0.198 vs 0.681,
+  wrong-way 2.3% vs 41%. last under-steers hard turns more than best-val (0.76 vs 0.81).
+- Ties: 23% of frames with top two bins within 0.02, 6.0% of frames with them > 3 bins apart
+  (fwd: 2.3%), so more left/right jumps possible than forward.
+- Robot test 2026-11-15 (`bwd_cate_please` = best-val): 19.8 takeovers/min over 30 s of model
+  driving; under-steers like fwd (you 240, model 162 where you steered > 150), with 0.20 of its
+  probability on the wrong side there.
+- Conclusion / next step: far better on straights and on the newer sessions, under-steers hard
+  reverse turns where cil (always near full lock) doesn't. A cil_mobile_fast trained on s1-8
+  would separate the effect of the bins from that of the data.
 
 ### Earlier experiments (before the indicator work)
 

@@ -19,15 +19,7 @@ def direction_metric(y_true, y_pred):
     )
 
 
-def throttle_metric(y_true, y_pred):
-    # Column 1 is throttle. Until this existed, every logged metric looked only at
-    # steering, so a model that had stopped predicting usable throttle still showed
-    # healthy numbers all the way through training.
-    return tf.abs(y_true[:, 1] - y_pred[:, 1]) < 0.1
-
-
-def throttle_direction_metric(y_true, y_pred):
-    # Deliberately without the small-magnitude escape hatch that direction_metric has:
-    # predicting ~0 throttle is exactly the failure this metric exists to catch, so it
-    # must not be scored as correct.
-    return tf.math.sign(y_pred[:, 1]) == tf.math.sign(y_true[:, 1])
+def mean_absolute_error(y_true, y_pred):
+    # Keras's, over (steering, throttle) only: cil_mobile_fast_cat appends its steering
+    # bin probabilities to its output. Same name, so the history key stays the same.
+    return tf.reduce_mean(tf.abs(y_true - y_pred[:, :2]), axis=-1)

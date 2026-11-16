@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 
-from . import dataset_dir, metrics, tfrecord_mem, tfrecord_seq, tfrecord_utils
+from . import dataset_dir, metrics, models, tfrecord_mem, tfrecord_seq, tfrecord_utils  # noqa: F401 - models registers SteeringDecode
 
 # Same thresholds as metrics.py (normalized units, 0.1 ~ 25 raw).
 TOLERANCE = 0.1
@@ -91,7 +91,8 @@ def predict_all(model, dataset, batch_size=64):
         pred = model(model_inputs, training=False)
         cmds.append(inputs[1].numpy())
         labels.append(label.numpy())
-        preds.append(np.asarray(pred))
+        # (steering, throttle); cil_mobile_fast_cat appends its bin probabilities.
+        preds.append(np.asarray(pred)[:, :2])
     return np.concatenate(cmds), np.concatenate(labels), np.concatenate(preds)
 
 
@@ -186,10 +187,15 @@ def summary(labels, preds):
         },
         "throttle": {
             "MAE": err[:, 1].mean(),
-            "within 0.1": pct(metrics.throttle_metric),
-            "direction": pct(metrics.throttle_direction_metric),
         },
     }
+
+
+def fmt_stats(s):
+    """'MAE 0.123 | within 0.1 45.6% | ...' for whichever stats a column has."""
+    return " | ".join(
+        ("%s %.3f" if k == "MAE" else "%s %.1f%%") % (k, v) for k, v in s.items()
+    )
 
 
 def plot_scatter(labels, preds, stats, out_path):
@@ -211,11 +217,7 @@ def plot_scatter(labels, preds, stats, out_path):
         ax.set_ylabel("predicted " + name)
         ax.set_aspect("equal")
         ax.legend(loc="upper left")
-        s = stats[name]
-        ax.set_title(
-            "%s  MAE %.3f | within 0.1 %.1f%% | direction %.1f%%"
-            % (name, s["MAE"], s["within 0.1"], s["direction"])
-        )
+        ax.set_title("%s  %s" % (name, fmt_stats(stats[name])))
     fig.suptitle("Test set: %d frames" % len(labels))
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
@@ -340,10 +342,7 @@ def run(model, dataset, out_dir, num_samples=20, seed=0, tfrec_path=None):
     plot_scatter(labels, preds, stats, os.path.join(out_dir, "eval_scatter.png"))
 
     for name, s in stats.items():
-        print(
-            "%-8s MAE %.3f | within 0.1: %.1f%% | direction: %.1f%%"
-            % (name, s["MAE"], s["within 0.1"], s["direction"])
-        )
+        print("%-8s %s" % (name, fmt_stats(s)))
     print("Saved eval_samples.png and eval_scatter.png to", out_dir)
 
     mem_len = mem_len_of(model)

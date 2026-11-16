@@ -297,6 +297,87 @@ def cil_mobile_fast_memory(img_width, img_height, bn=True, policy="autopilot", m
     return model
 
 
+# Steering classes of cil_mobile_fast_cat: centres evenly spaced over [-1, 1], an odd
+# number so that straight ahead has a bin of its own (21: one per 0.1, ~25 raw units).
+# losses.ce_angle builds its targets on the same centres.
+STEER_BINS = 21
+
+
+@tf.keras.utils.register_keras_serializable(package="openbot")
+class SteeringDecode(tf.keras.layers.Layer):
+    """Steering bin probabilities -> one steering value: the probability-weighted mean of
+    the most likely bin's centre and its two neighbours'. Finer than the bare argmax
+    (donkeycar's linear_unbin), which moves in whole bins, and unlike the mean over all
+    bins it does not average a turn with "straight" when the model is torn between them.
+    Plain ops (ARG_MAX, ONE_HOT, MUL, SUM, DIV) that the phone's TFLite 2.4 runs."""
+
+    def call(self, probs):
+        n = probs.shape[-1]
+        centers = tf.linspace(-1.0, 1.0, n)
+        peak = tf.argmax(probs, axis=-1, output_type=tf.int32)
+        # one_hot of -1 or n is all zeros, so at the ends the window is two bins.
+        window = (
+            tf.one_hot(peak - 1, n) + tf.one_hot(peak, n) + tf.one_hot(peak + 1, n)
+        )
+        p = probs * window
+        return tf.reduce_sum(p * centers, -1, keepdims=True) / tf.reduce_sum(
+            p, -1, keepdims=True
+        )
+
+
+def cil_mobile_fast_cat(img_width, img_height, bn=True, policy="autopilot"):
+    """cil_mobile_fast with steering as STEER_BINS classes, donkeycar's KerasCategorical
+    idea: a softmax over steering bins can put its peak on a hard turn where a single
+    regressed value settles between the turn and straight ahead.
+
+    Everything up to the last layer is cil_mobile_fast (CNN, cmd MLP, raw cmd before each
+    later layer). Its Dense(2) becomes a softmax over the steering bins and a linear
+    throttle, which can still reverse. The output is (steering, throttle, bin
+    probabilities): columns 0 and 1 are what the other models output - steering decoded
+    by SteeringDecode - so the metrics and previews work as for them, and the loss
+    (losses.ce_angle) trains on the probabilities. utils.generate_tflite
+    exports only (steering, throttle), so on the phone it is an ordinary CMDNAV model.
+    """
+    if policy != "autopilot":
+        raise Exception("cil_mobile_fast_cat only supports the autopilot policy")
+
+    mlp = create_mlp(1, 16, 16, name="cmd")
+    cnn = create_cnn(
+        img_width,
+        img_height,
+        3,
+        cnn_filters=(32, 32, 64, 64, 128),
+        kernel_sz=(5, 3, 3, 3, 2),
+        stride=(2, 2, 2, 2, 2),
+        padding="valid",
+        activation="relu",
+        conv_dropout=0.2,
+        mlp_filters=(512, 512),
+        bn=bn,
+    )
+
+    # fuse input MLP and CNN
+    combinedInput = tf.keras.layers.concatenate([mlp.output, cnn.output])
+
+    # output MLP
+    x = tf.keras.layers.Dense(64, activation="relu")(combinedInput)
+    x = tf.keras.layers.concatenate([mlp.input, x])
+    x = tf.keras.layers.Dense(64, activation="relu")(x)
+    x = tf.keras.layers.concatenate([mlp.input, x])
+    steer_probs = tf.keras.layers.Dense(
+        STEER_BINS, activation="softmax", name="steer_bins"
+    )(x)
+    throttle = tf.keras.layers.Dense(1, activation="linear", name="throttle")(x)
+    steering = SteeringDecode(name="steer_decode")(steer_probs)
+    x = tf.keras.layers.concatenate([steering, throttle, steer_probs])
+
+    model = tf.keras.Model(
+        name="cil_mobile_fast_cat", inputs=(cnn.input, mlp.input), outputs=x
+    )
+
+    return model
+
+
 def cil(img_width, img_height, bn=True, policy="autopilot"):
     if policy == "autopilot":
         mlp = create_mlp(1, 64, 64, dropout=0.5, name="cmd")
@@ -531,3 +612,78 @@ def donkey_rnn(img_width, img_height, bn=False, policy="autopilot", seq_len=3):
     x = tf.keras.layers.Dense(2, activation="linear")(x)
 
     return tf.keras.Model(name="donkey_rnn", inputs=(img_in, cmd_in), outputs=x)
+
+
+def donkey_3d(img_width, img_height, bn=True, policy="autopilot", seq_len=3):
+    """donkeycar's 3D CNN pilot (Keras3D_CNN, build_3d_cnn in donkeycar/parts/keras.py)
+    as the image tower, with cil_mobile_fast's cmd head.
+
+    donkeycar's layers: four 3D convolutions (16, 32, 64, 128 filters, kernel 3 in time
+    and space, the first with spatial stride 3), each followed by a 2x2 spatial max pool,
+    then Dense 256 - batch norm - relu - dropout 0.5, twice. Plain convolutions over a
+    stack of frames, no LSTM. The cmd then joins as in cil_mobile_fast: its own 16-16
+    MLP fused with the image features, Dense 64 twice with the raw cmd again before
+    each, and a linear output, so it can predict reverse. Batch norm is donkeycar's and
+    always on (bn is ignored).
+
+    The phone's TFLite (2.4) has no CONV_3D or 3D pooling kernel, so the 3D layers are
+    written as their exact 2D equivalent. A Conv3D with time kernel 3, time stride 1 and
+    "same" padding gives, for frame t, the sum over t-1, t, t+1 of a 2D convolution of
+    that frame; that is one Conv2D over the three frames stacked on the channel axis,
+    with a zero frame past either end - the padding Conv3D uses. The same Conv2D layer
+    serves every t, as Conv3D's kernel does, so the parameters and the function are
+    Conv3D's. A (1, 2, 2) MaxPooling3D is a 2x2 MaxPooling2D per frame. Everything stays
+    4-D, so the .tflite holds only CONV_2D, MAX_POOL_2D, CONCATENATION, STRIDED_SLICE
+    and ZEROS_LIKE besides the dense layers.
+
+    The input is the seq records' stack, (height, width, 3 * seq_len), frames oldest
+    first, as for donkey_rnn and AutopilotSeq on the phone. donkeycar feeds 20
+    consecutive frames; here it is the stack --seq_offsets picks (default 3 frames over
+    200 ms), so the time kernel sees the whole stack.
+    """
+    if policy != "autopilot":
+        raise Exception("donkey_3d only supports the autopilot policy")
+
+    drop = 0.5
+    img_in = tf.keras.Input(
+        shape=(img_height, img_width, 3 * seq_len), name="img_input"
+    )
+    frames = [img_in[..., 3 * i : 3 * i + 3] for i in range(seq_len)]
+
+    for n, (filters, stride) in enumerate(((16, 3), (32, 1), (64, 1), (128, 1))):
+        conv = tf.keras.layers.Conv2D(
+            filters,
+            (3, 3),
+            strides=(stride, stride),
+            padding="same",
+            activation="relu",
+            name=f"conv3d_{n + 1}",
+        )
+        pool = tf.keras.layers.MaxPooling2D(
+            pool_size=(2, 2), strides=(2, 2), padding="valid", name=f"pool3d_{n + 1}"
+        )
+        zero = tf.zeros_like(frames[0])
+        padded = [zero] + frames + [zero]
+        frames = [
+            pool(conv(tf.keras.layers.concatenate(padded[t : t + 3])))
+            for t in range(seq_len)
+        ]
+
+    x = tf.keras.layers.concatenate(frames) if seq_len > 1 else frames[0]
+    x = tf.keras.layers.Flatten()(x)
+    for _ in range(2):
+        x = tf.keras.layers.Dense(256)(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.Activation("relu")(x)
+        x = tf.keras.layers.Dropout(drop)(x)
+
+    cmd_in = tf.keras.Input(shape=(1,), name="cmd_input")
+    cmd = create_mlp(1, 16, 16, name="cmd")(cmd_in)
+    x = tf.keras.layers.concatenate([cmd, x])
+    x = tf.keras.layers.Dense(64, activation="relu")(x)
+    x = tf.keras.layers.concatenate([cmd_in, x])
+    x = tf.keras.layers.Dense(64, activation="relu")(x)
+    x = tf.keras.layers.concatenate([cmd_in, x])
+    x = tf.keras.layers.Dense(2, activation="linear")(x)
+
+    return tf.keras.Model(name="donkey_3d", inputs=(img_in, cmd_in), outputs=x)

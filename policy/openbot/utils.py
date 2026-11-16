@@ -10,6 +10,8 @@ from nbconvert import HTMLExporter
 import codecs
 import nbformat
 
+from . import models  # noqa: F401 - registers SteeringDecode for load_model
+
 # Select non-interactive backend for compatability
 plt.switch_backend("agg")
 
@@ -141,6 +143,11 @@ def generate_tflite(path, filename):
         unrolled = tf.keras.Model.from_config(config)
         unrolled.set_weights(model.get_weights())
         converter = tf.lite.TFLiteConverter.from_keras_model(unrolled)
+    elif model.output_shape[-1] > 2:
+        # cil_mobile_fast_cat: columns 2+ are the steering bin probabilities the loss
+        # trains on. The phone reads (steering, throttle), already decoded in the graph.
+        phone_model = tf.keras.Model(model.inputs, model.outputs[0][:, :2])
+        converter = tf.lite.TFLiteConverter.from_keras_model(phone_model)
     else:
         converter = tf.lite.TFLiteConverter.from_saved_model(
             os.path.join(path, filename)
@@ -219,7 +226,7 @@ def compare_tf_tflite(
     tflite_results = interpreter.get_tensor(output_details[0]["index"])
     tf_results = model.predict(
         tuple(tf.constant(input_data[name]) for name in model.input_names)
-    )
+    )[:, :2]  # cil_mobile_fast_cat's bin probabilities aren't exported
     print("tflite:", tflite_results)
     print("tf:", tf_results)
 

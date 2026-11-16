@@ -70,6 +70,35 @@ def sq_weighted_mse_angle(y_true, y_pred):
     return tf.math.square(weight) * (throttle_err + 5.0 * steering_err)
 
 
+# cil_mobile_fast_cat: spread of the soft steering target, in bins, and the weight of the
+# throttle error against the steering cross-entropy (which is ~1-3 where a squared
+# throttle error is ~0.01, so without it throttle would barely train).
+STEER_SIGMA_BINS = 1.0
+CAT_THROTTLE_WEIGHT = 10.0
+
+
+def ce_angle(y_true, y_pred):
+    # Loss of cil_mobile_fast_cat, whose y_pred is (steering, throttle, steering bin
+    # probabilities). The steering label becomes a Gaussian over the bin centres
+    # (STEER_SIGMA_BINS wide), so being one bin off costs less than being far off, and
+    # the decoded steering can fall between centres; the probabilities are trained on it
+    # with cross-entropy. Throttle stays a squared error.
+    # Unweighted, as donkeycar's KerasCategorical: with sq_weighted_mse_angle's turn
+    # weight w^2 (0.0025 straight, up to 4.2 on a hard turn) the "straight" bins got no
+    # signal and the first run never predicted them, though 39% of its test frames are
+    # straight driving (EXPERIMENTS.md).
+    probs = y_pred[:, 2:]
+    n = probs.shape[-1]
+    centers = tf.linspace(-1.0, 1.0, n)
+    sigma = STEER_SIGMA_BINS * 2.0 / (n - 1)
+    steer = tf.clip_by_value(angle(y_true), -1.0, 1.0)
+    target = tf.math.exp(-0.5 * tf.math.square((steer[:, None] - centers) / sigma))
+    target = target / tf.reduce_sum(target, axis=-1, keepdims=True)
+    steering_ce = tf.keras.losses.categorical_crossentropy(target, probs)
+    throttle_err = tf.math.square(throttle(y_true) - throttle(y_pred))
+    return steering_ce + CAT_THROTTLE_WEIGHT * throttle_err
+
+
 def weighted_mse_raw_angle(y_gt, y_pred):
     return angle_weight(y_gt) * (mse_raw(y_gt, y_pred) + mse_angle(y_gt, y_pred))
 

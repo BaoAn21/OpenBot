@@ -74,6 +74,43 @@ def augment_cmd(cmd):
     return cmd
 
 
+TILT_MAX_DEG = 5.0  # largest rotation, either way
+
+
+def tilt_img(img, max_deg=TILT_MAX_DEG):
+    """
+    Rotates the image about its centre by a random angle in [-max_deg, max_deg]: the
+    camera rolled a little, as when the car leans in a turn or the mount sits a bit
+    crooked.
+
+    Works on any number of channels, so a frame stack (height, width, 3 * seq_len)
+    turns as one and keeps the motion between its frames. Rolling the camera doesn't
+    change where the car should go, so the label stays as it is (a sideways shift would
+    need a steering correction; a roll doesn't). The corners the rotation uncovers are
+    filled by reflecting the image, not with black wedges the model could learn to look
+    for. The angle is drawn with a tf op, per sample, for the reason in flip_sample.
+    """
+    angle = tf.random.uniform([], -max_deg, max_deg) * (np.pi / 180.0)
+    h = tf.cast(tf.shape(img)[0], tf.float32)
+    w = tf.cast(tf.shape(img)[1], tf.float32)
+    cx, cy = (w - 1.0) / 2.0, (h - 1.0) / 2.0
+    cos, sin = tf.cos(angle), tf.sin(angle)
+    # For every output pixel (x, y), the input pixel it is read from:
+    # x_in = cos * (x - cx) - sin * (y - cy) + cx, y_in = sin * (x - cx) + cos * (y - cy) + cy.
+    transform = tf.stack(
+        [cos, -sin, cx - cos * cx + sin * cy, sin, cos, cy - sin * cx - cos * cy, 0.0, 0.0]
+    )
+    out = tf.raw_ops.ImageProjectiveTransformV3(
+        images=img[None],
+        transforms=transform[None],
+        output_shape=tf.shape(img)[:2],
+        fill_value=0.0,
+        interpolation="BILINEAR",
+        fill_mode="REFLECT",
+    )[0]
+    return tf.ensure_shape(out, img.shape)
+
+
 def flip_sample(img, cmd, label):
     """
     Mirrors an (image, steering, throttle) sample horizontally, per sample.

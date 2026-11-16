@@ -24,12 +24,17 @@ import re
 import numpy as np
 import tensorflow as tf
 
-from . import dataset_dir, tfrecord_mem, tfrecord_seq, tfrecord_utils
+from . import dataset_dir, models, tfrecord_mem, tfrecord_seq, tfrecord_utils  # noqa: F401 - models registers SteeringDecode
 
 # Worst differences a correct, quantized export shows on this project's models
-# (cil_mobile_fast, pilot_net, donkey_memory, donkey_rnn): ~0.03. A broken one was 0.3.
+# (cil_mobile_fast, pilot_net, donkey_memory, donkey_rnn, donkey_3d): ~0.03. A broken one was 0.3.
 MATCH_P99 = 0.05
 MATCH_MAX = 0.1
+# cil_mobile_fast_cat steers by its most likely bin. Where the two most likely are closer
+# than this, the quantized weights can tip it to the other one - a jump of whole bins
+# that a correct export also shows (seen up to 1.9 at a margin of 0.003), so those frames
+# are counted apart from the match test.
+TIE_MARGIN = 0.02
 
 
 def input_name(name):
@@ -45,7 +50,8 @@ def records_for(model_dir):
     seq = re.search(r"_seq(\d+(?:-\d+)*)", name)
     mem = re.search(r"_mem(\d+)", name)
     if seq:
-        return os.path.join(dataset_dir, f"tfrecords_seq{seq[1]}", "test.tfrec")
+        folder = f"tfrecords_bwd_seq{seq[1]}" if name.startswith("bwd_") else f"tfrecords_seq{seq[1]}"
+        return os.path.join(dataset_dir, folder, "test.tfrec")
     if mem:
         folder = f"tfrecords_bwd_mem{mem[1]}" if name.startswith("bwd_") else f"tfrecords_mem{mem[1]}"
         return os.path.join(dataset_dir, folder, "test.tfrec")
@@ -85,6 +91,13 @@ def check(checkpoint, tflite_path, records, max_frames=1000, verbose=True):
 
     names = [input_name(t.name) for t in model.inputs]
     expected = model.predict([inputs[name] for name in names], batch_size=64, verbose=0)
+    ties = np.zeros(n, bool)
+    if expected.shape[-1] > 2:
+        # cil_mobile_fast_cat: (steering, throttle, bin probabilities); only the first
+        # two are exported.
+        top2 = np.sort(expected[:, 2:], axis=-1)[:, -2:]
+        ties = top2[:, 1] - top2[:, 0] < TIE_MARGIN
+    expected = expected[:, :2]
 
     interpreter = tf.lite.Interpreter(model_path=tflite_path)
     interpreter.allocate_tensors()
@@ -101,7 +114,9 @@ def check(checkpoint, tflite_path, records, max_frames=1000, verbose=True):
 
     # Frame after frame, no reset, as on the phone.
     got = np.array([run(i) for i in range(n)])
-    diff = np.abs(got - expected)
+    diff = np.abs(got - expected)[~ties]
+    if len(diff) == 0:
+        raise SystemExit("every test frame is a near-tie between two steering bins")
     p99, worst = np.percentile(diff, 99), diff.max()
     match_ok = p99 <= MATCH_P99 and worst <= MATCH_MAX
 
@@ -116,6 +131,12 @@ def check(checkpoint, tflite_path, records, max_frames=1000, verbose=True):
             f"99% of them under {p99:.4f}, mean {diff.mean():.4f} "
             f"(limits {MATCH_MAX} / {MATCH_P99})"
         )
+        if ties.any():
+            tie_diff = np.abs(got - expected)[ties][:, 0].max()
+            print(
+                f"             {ties.sum()} frames left out: two steering bins within "
+                f"{TIE_MARGIN}, biggest steering difference there {tie_diff:.4f}"
+            )
         print(
             f"  stateless: {'PASS' if stateless_ok else 'FAIL'}  first frame again: "
             f"{np.round(again, 4)} vs {np.round(got[0], 4)} the first time"

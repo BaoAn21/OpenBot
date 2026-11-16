@@ -2,18 +2,24 @@
 
   fwd  donkey_memory (--color_aug), the default, or
        cil_mobile_fast_memory (--batch_norm --flip_aug); records in dataset/tfrecords_mem<N>/
-       or cil_mobile_fast (--batch_norm --flip_aug); records in dataset/tfrecords_fwd/
-       or donkey_rnn (frames --seq_offsets, default 0,3,6); records in
+       or cil_mobile_fast or cil_mobile_fast_cat (--batch_norm --flip_aug); records in
+       dataset/tfrecords_fwd/
+       or donkey_rnn or donkey_3d (frames --seq_offsets, default 0,3,6); records in
        dataset/tfrecords_seq<offsets>/
-  bwd  cil_mobile_fast (--batch_norm --flip_aug), the default, records in dataset/tfrecords/,
+  bwd  cil_mobile_fast (--batch_norm --flip_aug), the default, or cil_mobile_fast_cat,
+       records in dataset/tfrecords/,
        or cil_mobile_fast_memory (--batch_norm --flip_aug) or donkey_memory_reverse
-       (--color_aug), records in dataset/tfrecords_bwd_mem<N>/
+       (--color_aug), records in dataset/tfrecords_bwd_mem<N>/, or donkey_rnn or donkey_3d
 
 Pick the model with --model; cil_mobile_fast_memory is cil_mobile_fast plus donkey_memory's
 memory of its last --mem_len (default 3) outputs, donkey_memory_reverse is donkey_memory with
 a tanh throttle so it can reverse. donkey_rnn is donkeycar's rnn pilot (a CNN per frame, two
-LSTMs over a stack of frames) with a cmd input; forward only for now, since a backward
-folder holds several reverses and its windows would step from one into the next.
+LSTMs over a stack of frames) with a cmd input; for either direction (bwd records in
+dataset/tfrecords_bwd_seq<offsets>/, windows cut at gaps > 0.5 s since a backward folder
+holds several reverses). donkey_3d is donkeycar's 3D CNN pilot (plain convolutions over the
+same stack, no LSTM) with cil_mobile_fast's cmd head; it shares donkey_rnn's records.
+cil_mobile_fast_cat is cil_mobile_fast with steering as 21 classes (donkeycar's categorical
+idea), decoded back to one value inside the model; it shares cil_mobile_fast's records.
 
 The sessions come from dataset/fwdbwd/{train,test}/<fwd|bwd>/session_<N>/ (see
 split_direction.py). The records are rebuilt only when the choice of sessions or their
@@ -34,6 +40,10 @@ Usage (from policy/, conda env):
     python train_fwdbwd.py bwd --model cil_mobile_fast_memory
     python train_fwdbwd.py bwd --model donkey_memory_reverse
     python train_fwdbwd.py fwd --model donkey_rnn
+    python train_fwdbwd.py bwd --model donkey_rnn
+    python train_fwdbwd.py fwd --model donkey_3d
+    python train_fwdbwd.py fwd --model cil_mobile_fast_cat
+    python train_fwdbwd.py bwd --model cil_mobile_fast_cat
     python train_fwdbwd.py fwd --sessions 2 --build_only
     python train_fwdbwd.py fwd --num_epochs 60
 """
@@ -57,13 +67,18 @@ MODELS = {
         "donkey_memory": ["--color_aug"],
         "cil_mobile_fast_memory": ["--batch_norm", "--flip_aug"],
         "cil_mobile_fast": ["--batch_norm", "--flip_aug"],
+        "cil_mobile_fast_cat": ["--batch_norm", "--flip_aug"],
         "pilot_net": ["--batch_norm", "--flip_aug"],
         "donkey_rnn": [],
+        "donkey_3d": [],
     },
     "bwd": {
         "cil_mobile_fast": ["--batch_norm", "--flip_aug"],
         "cil_mobile_fast_memory": ["--batch_norm", "--flip_aug"],
+        "cil_mobile_fast_cat": ["--batch_norm", "--flip_aug"],
         "donkey_memory_reverse": ["--color_aug"],
+        "donkey_rnn": [],
+        "donkey_3d": [],
     },
 }
 COMMON_ARGS = [
@@ -196,13 +211,28 @@ def build_fwd(stage, out_dir, mem_len, max_gap_s=None):
         )
 
 
-def build_seq(stage, out_dir, offsets):
+def build_seq(stage, out_dir, offsets, max_gap_s=None):
     from openbot import tfrecord_seq
 
     for _, data_dir, name in SPLITS:
         tfrecord_seq.convert_dataset(
-            os.path.join(stage, data_dir), out_dir, name, offsets, verbose=False
+            os.path.join(stage, data_dir),
+            out_dir,
+            name,
+            offsets,
+            verbose=False,
+            max_gap_s=max_gap_s,
         )
+
+
+def build_bwd_seq(stage, out_dir, offsets):
+    from split_direction import MAX_GAP_S
+
+    # As build_bwd_mem: a recording's reverses share one folder, so no window may reach
+    # from one into the previous one.
+    build_seq(stage, out_dir, offsets, max_gap_s=MAX_GAP_S)
+    for _, _, name in SPLITS:
+        check_bwd(os.path.join(out_dir, name))
 
 
 def check_bwd(path):
@@ -258,7 +288,8 @@ def build_bwd_mem(stage, out_dir, mem_len):
 def records_dir(dataset_dir, direction, mem_len, seq_tag=""):
     """mem_len is 0 and seq_tag empty for the plain backward records."""
     if seq_tag:
-        return os.path.join(dataset_dir, f"tfrecords_seq{seq_tag}")
+        prefix = "tfrecords_seq" if direction == "fwd" else "tfrecords_bwd_seq"
+        return os.path.join(dataset_dir, f"{prefix}{seq_tag}")
     if direction == "fwd":
         if mem_len:
             return os.path.join(dataset_dir, f"tfrecords_mem{mem_len}")
@@ -285,9 +316,10 @@ def main():
     )
     parser.add_argument(
         "--model",
-        help="fwd: donkey_memory (default), cil_mobile_fast_memory, cil_mobile_fast, pilot_net or "
-        "donkey_rnn; "
-        "bwd: cil_mobile_fast (default), cil_mobile_fast_memory or donkey_memory_reverse",
+        help="fwd: donkey_memory (default), cil_mobile_fast_memory, cil_mobile_fast, "
+        "cil_mobile_fast_cat, pilot_net, donkey_rnn or donkey_3d; "
+        "bwd: cil_mobile_fast (default), cil_mobile_fast_memory, cil_mobile_fast_cat, "
+        "donkey_memory_reverse, donkey_rnn or donkey_3d",
     )
     parser.add_argument(
         "--mem_len",
@@ -298,7 +330,7 @@ def main():
     parser.add_argument(
         "--seq_offsets",
         default="0,3,6",
-        help="frames of a donkey_rnn stack, back from the current one (default 0,3,6, "
+        help="frames of a donkey_rnn / donkey_3d stack, back from the current one (default 0,3,6, "
         "~0, 100 and 200 ms)",
     )
     parser.add_argument(
@@ -324,7 +356,7 @@ def main():
     mem_len = args.mem_len if "memory" in model else 0
     offsets = None
     seq_tag = ""
-    if model == "donkey_rnn":
+    if model in ("donkey_rnn", "donkey_3d"):
         from openbot import tfrecord_seq
 
         try:
@@ -355,7 +387,9 @@ def main():
         with contextlib.suppress(FileNotFoundError):
             os.remove(manifest_path)  # half-built records must never look current
         with staged(root, direction, numbers) as stage:
-            if offsets:
+            if offsets and direction == "bwd":
+                build_bwd_seq(stage, out_dir, offsets)
+            elif offsets:
                 build_seq(stage, out_dir, offsets)
             elif direction == "fwd" and mem_len:
                 build_fwd(stage, out_dir, mem_len)
@@ -379,7 +413,9 @@ def main():
         cmd += ["--mem_len", str(mem_len)]
     if offsets:
         cmd += ["--seq_offsets", ",".join(str(o) for o in offsets)]
-    if (direction == "bwd" and mem_len) or (direction == "fwd" and not mem_len and not offsets):
+    if (direction == "bwd" and (mem_len or offsets)) or (
+        direction == "fwd" and not mem_len and not offsets
+    ):
         cmd += ["--records_dir", out_dir]
     cmd += train_extra  # later options win in argparse
     print(" ".join(cmd[1:]))

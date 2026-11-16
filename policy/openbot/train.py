@@ -47,7 +47,9 @@ AUTOTUNE = tf.data.experimental.AUTOTUNE
 # donkeycar's memory model and its reverse twin train the same way.
 DONKEY_MODELS = ("donkey_memory", "donkey_memory_reverse")
 # Trained on donkeycar's plain mse unless --turn_loss, without batch norm.
-MSE_MODELS = DONKEY_MODELS + ("donkey_rnn",)
+MSE_MODELS = DONKEY_MODELS + ("donkey_rnn", "donkey_3d")
+# Steering as classes; trained on losses.ce_angle.
+CAT_MODELS = ("cil_mobile_fast_cat",)
 
 if tf.test.gpu_device_name():
     print("Default GPU Device:{}".format(tf.test.gpu_device_name()))
@@ -71,6 +73,8 @@ class Hyperparameters:
     IS_CROP: bool = False
     FLIP_AUG: bool = False
     CMD_AUG: bool = False
+    # Random small rotation (camera roll), data_augmentation.tilt_img; label unchanged.
+    TILT_AUG: bool = False
 
     # Frame offsets back from the current frame, comma separated and starting at 0
     # (each step is one timeline position). Empty means the single-frame policy.
@@ -134,6 +138,8 @@ class Hyperparameters:
             model_name += "_flip"
         if self.CMD_AUG:
             model_name += "_cmd"
+        if self.TILT_AUG:
+            model_name += "_tilt"
         if self.SEQ_LEN > 1:
             # Part of the name so runs with different window shapes cannot land in
             # the same checkpoint directory.
@@ -293,6 +299,8 @@ def load_tfrecord(tr: Training, verbose=0):
                 image, cmd_input, mem, label = data_augmentation.flip_sample_mem(
                     image, cmd_input, mem, label
                 )
+            if tr.hyperparameters.TILT_AUG:
+                image = data_augmentation.tilt_img(image)
             if tr.hyperparameters.MEM_AUG:
                 mem = data_augmentation.augment_mem(mem)
             if tr.hyperparameters.CMD_AUG:
@@ -309,6 +317,9 @@ def load_tfrecord(tr: Training, verbose=0):
                 image, cmd_input, label = data_augmentation.flip_sample(
                     image, cmd_input, label
                 )
+            if tr.hyperparameters.TILT_AUG:
+                # One angle for the whole stack, so the motion between frames is kept.
+                image = data_augmentation.tilt_img(image)
             if tr.hyperparameters.CMD_AUG:
                 cmd_input = data_augmentation.augment_cmd(cmd_input)
         elif tr.hyperparameters.POLICY == "point_goal_nav":
@@ -326,6 +337,8 @@ def load_tfrecord(tr: Training, verbose=0):
                 print(
                     "Command augmentation is not implemented for Point Goal Navigation."
                 )
+            if tr.hyperparameters.TILT_AUG:
+                print("Tilt augmentation is not implemented for Point Goal Navigation.")
 
         return (image, cmd_input), label
 
@@ -448,6 +461,8 @@ def load_data(tr: Training, verbose=0):
         img = data_augmentation.augment_img(img)
         if tr.hyperparameters.FLIP_AUG:
             img, cmd_input, label = data_augmentation.flip_sample(img, cmd_input, label)
+        if tr.hyperparameters.TILT_AUG and tr.hyperparameters.POLICY == "autopilot":
+            img = data_augmentation.tilt_img(img)
         if tr.hyperparameters.CMD_AUG:
             cmd_input = data_augmentation.augment_cmd(cmd_input)
         return (img, cmd_input), label
@@ -508,8 +523,6 @@ def do_training(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0):
     tr.custom_objects = {
         "direction_metric": metrics.direction_metric,
         "angle_metric": metrics.angle_metric,
-        "throttle_metric": metrics.throttle_metric,
-        "throttle_direction_metric": metrics.throttle_direction_metric,
     }
 
     if tr.hyperparameters.WANDB:
@@ -579,17 +592,20 @@ def do_training(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0):
     if tr.hyperparameters.MODEL in MSE_MODELS and not tr.hyperparameters.TURN_LOSS:
         # donkeycar trains its models on plain mse, not the turn-weighted loss.
         tr.loss_fn = losses.mse_raw
+    elif tr.hyperparameters.MODEL in CAT_MODELS:
+        tr.loss_fn = losses.ce_angle
     elif tr.hyperparameters.POLICY == "autopilot":
         tr.loss_fn = losses.sq_weighted_mse_angle
     elif tr.hyperparameters.POLICY == "point_goal_nav":
         tr.loss_fn = losses.mae_raw_weighted_mse_angle
 
     tr.metric_list = [
-        "mean_absolute_error",
+        # cil_mobile_fast_cat outputs more than its two labels; the others use Keras's.
+        metrics.mean_absolute_error
+        if tr.hyperparameters.MODEL in CAT_MODELS
+        else "mean_absolute_error",
         tr.custom_objects["direction_metric"],
         tr.custom_objects["angle_metric"],
-        tr.custom_objects["throttle_metric"],
-        tr.custom_objects["throttle_direction_metric"],
     ]
     optimizer = tf.keras.optimizers.Adam(learning_rate=tr.hyperparameters.LEARNING_RATE)
 
@@ -680,39 +696,16 @@ def do_evaluation(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0
     plt.legend(loc="lower right")
     utils.savefig(os.path.join(tr.log_path, "angle.png"))
 
-    plt.figure().gca().xaxis.get_major_locator().set_params(integer=True)
-    plt.plot(x, tr.history.history["throttle_metric"], label="throttle_metric")
-    plt.plot(x, tr.history.history["val_throttle_metric"], label="val_throttle_metric")
-    plt.plot(
-        x,
-        tr.history.history["throttle_direction_metric"],
-        label="throttle_direction_metric",
-    )
-    plt.plot(
-        x,
-        tr.history.history["val_throttle_direction_metric"],
-        label="val_throttle_direction_metric",
-    )
-    plt.xlabel("Epoch")
-    plt.ylabel("Throttle Metric")
-    plt.legend(loc="lower right")
-    utils.savefig(os.path.join(tr.log_path, "throttle.png"))
-
     def summarize(title, index):
         h = tr.history.history
         print(
-            "%s - angle: %.4f, val_angle: %.4f, direction: %.4f, val_direction: %.4f, "
-            "throttle: %.4f, val_throttle: %.4f, throttle_dir: %.4f, val_throttle_dir: %.4f"
+            "%s - angle: %.4f, val_angle: %.4f, direction: %.4f, val_direction: %.4f"
             % (
                 title,
                 h["angle_metric"][index],
                 h["val_angle_metric"][index],
                 h["direction_metric"][index],
                 h["val_direction_metric"][index],
-                h["throttle_metric"][index],
-                h["val_throttle_metric"][index],
-                h["throttle_direction_metric"][index],
-                h["val_throttle_direction_metric"][index],
             )
         )
 
@@ -925,7 +918,9 @@ if __name__ == "__main__":
             "donkey_memory",
             "donkey_memory_reverse",
             "cil_mobile_fast_memory",
+            "cil_mobile_fast_cat",
             "donkey_rnn",
+            "donkey_3d",
         ],
         help="network architecture (default: pilot_net)",
     )
@@ -986,7 +981,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--turn_loss",
         action="store_true",
-        help="the donkey_memory models and donkey_rnn: train on the turn-weighted "
+        help="the donkey_memory models, donkey_rnn and donkey_3d: train on the turn-weighted "
         "autopilot loss (losses.sq_weighted_mse_angle) instead of donkeycar's mse",
     )
     parser.add_argument(
@@ -1036,6 +1031,13 @@ if __name__ == "__main__":
         help="add noise to command input for augmentation",
     )
     parser.add_argument(
+        "--tilt_aug",
+        action="store_true",
+        help="rotate training images by a random angle up to "
+        f"{data_augmentation.TILT_MAX_DEG:g} degrees either way (camera roll; a frame "
+        "stack turns as one; labels unchanged), any autopilot model",
+    )
+    parser.add_argument(
         "--resume", action="store_true", help="resume previous training"
     )
     parser.add_argument(
@@ -1068,6 +1070,7 @@ if __name__ == "__main__":
     params.BATCH_NORM = args.batch_norm
     params.FLIP_AUG = args.flip_aug
     params.CMD_AUG = args.cmd_aug
+    params.TILT_AUG = args.tilt_aug
     if args.seq_offsets or args.seq_len:
         try:
             offsets = tfrecord_seq.resolve_offsets(
@@ -1088,7 +1091,7 @@ if __name__ == "__main__":
     )
     if params.SEQ_LEN > 1 and not is_seq_model:
         parser.error(
-            f"stacked frames need --model pilot_net_seq or donkey_rnn, not {params.MODEL}"
+            f"stacked frames need --model pilot_net_seq, donkey_rnn or donkey_3d, not {params.MODEL}"
         )
     if params.SEQ_LEN == 1 and is_seq_model:
         parser.error(f"--model {params.MODEL} needs --seq_offsets (or --seq_len)")
@@ -1115,7 +1118,7 @@ if __name__ == "__main__":
         )
     if args.turn_loss and params.MODEL not in MSE_MODELS:
         parser.error(
-            f"--turn_loss is for the donkey_memory models and donkey_rnn; "
+            f"--turn_loss is for the donkey_memory models, donkey_rnn and donkey_3d; "
             f"{params.MODEL} always uses the turn-weighted loss"
         )
     if args.mem_aug and not is_mem_model:
@@ -1147,6 +1150,12 @@ if __name__ == "__main__":
         # comes with the stacked-frame path, as for pilot_net_seq.
         params.TURN_LOSS = args.turn_loss
         params.BATCH_NORM = False
+    if params.MODEL == "donkey_3d":
+        # donkeycar's 3D CNN: batch norm in its dense layers always, so the name says
+        # _bn; mse unless --turn_loss, as donkey_rnn. Colour augmentation comes with the
+        # stacked-frame path; --flip_aug and --cmd_aug are opt-in.
+        params.TURN_LOSS = args.turn_loss
+        params.BATCH_NORM = True
 
     if args.records_dir:
         if args.create_tf_record or args.no_tf_record:
