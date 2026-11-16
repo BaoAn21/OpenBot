@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenBot Trainer</title>
+  <link rel="stylesheet" href="/fb/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/inbox">OpenBot <span>fwd · bwd</span></a>
+    <nav id="nav">
+      <a href="#/inbox" data-page="inbox">Inbox <span class="badge" id="nav-inbox" hidden></span></a>
+      <a href="#/sessions" data-page="sessions">Sessions</a>
+      <a href="#/train" data-page="train">Train</a>
+      <a href="#/models" data-page="models">Models</a>
+      <a href="#/runs" data-page="runs">Autopilot runs</a>
+      <a href="#/jobs" data-page="jobs">Jobs</a>
+    </nav>
+    <div class="status">
+      <a id="status-job" class="pill" href="#/train" hidden></a>
+      <span id="status-gpu" class="pill" title="GPU"></span>
+      <a class="pill quiet" href="/legacy/" title="The old trainer UI">old UI</a>
+    </div>
+  </header>
+  <main id="view"></main>
+  <div id="toasts" aria-live="polite"></div>
+  <script type="module" src="/fb/app.js"></script>
+</body>
+</html>

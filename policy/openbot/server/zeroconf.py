@@ -12,16 +12,20 @@ from netifaces import interfaces, ifaddresses, AF_INET
 
 SERVICE_TYPE = "_openbot-server._tcp.local."
 
-loop = asyncio.get_event_loop()
-zc = Zeroconf(loop)
+zc = None
+info = None
 
 
 async def register(app: web.Application):
+    # aiohttp's run_app starts its own event loop; Zeroconf must live on it
+    global zc
+    zc = Zeroconf(asyncio.get_running_loop())
     await run_test(zc)
     app.on_shutdown.append(on_shutdown)
 
 
 async def run_test(zc):
+    global info
     desc = {}
     local_ip = ip4_address()
     name = (
@@ -71,6 +75,8 @@ async def on_shutdown(app):
 
 
 if __name__ == "__main__":
+    loop = asyncio.get_event_loop()
+    zc = Zeroconf(loop)
     logging.basicConfig(level=logging.DEBUG)
     if len(sys.argv) > 1:
         assert sys.argv[1:] == ["--debug"]

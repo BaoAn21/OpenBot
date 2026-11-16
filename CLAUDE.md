@@ -146,10 +146,27 @@ LSTMs, raw cmd before each later layer. In `train.MSE_MODELS`: no BN, plain MSE 
 `invoke()` calls (the phone carried it from frame to frame, matching Keras only on the first
 call), so `utils.generate_tflite` exports any model with an LSTM layer **unrolled**: plain ops,
 no state, same weights (everything else still converts from the saved model). `.tflite` files
-exported before 2026-11-13 have the bug; `python check_tflite.py --export <folder>` re-exports. `train_fwdbwd.py fwd --model donkey_rnn`
-(`--seq_offsets`, default `0,3,6`) builds `dataset/tfrecords_seq<offsets>/`. Forward only: a bwd
-folder holds several reverses and `tfrecord_seq` doesn't cut windows at gaps. No memory, so
-its val metrics aren't teacher-forced. Not wired into the Autopilot Session screen yet.
+exported before 2026-11-13 have the bug; `python check_tflite.py --export <folder>` re-exports. `train_fwdbwd.py fwd|bwd --model donkey_rnn`
+(`--seq_offsets`, default `0,3,6`) builds `dataset/tfrecords_seq<offsets>/` fwd and
+`dataset/tfrecords_bwd_seq<offsets>/` bwd, the latter with windows cut at gaps > 0.5 s
+(`tfrecord_seq.convert_dataset(max_gap_s=...)`, timestamps from the folder's `rgbFrames.txt`), as a
+bwd folder holds several reverses. No memory, so its val metrics aren't teacher-forced. On the
+phone it drives from the Autopilot Seq screen or either direction of the Autopilot Session screen,
+which keeps a `FrameHistory` per `CMDNAV_SEQ` model, fed every camera frame on the camera thread.
+
+**donkey 3d (`--model donkey_3d`).** donkeycar's `Keras3D_CNN` (`build_3d_cnn`): four 3D
+convs (16/32/64/128, kernel 3x3x3, first spatial stride 3) each with a 2x2 spatial max pool,
+then Dense 256-BN-relu-dropout 0.5 twice; then cil_mobile_fast's cmd head (16-16 cmd MLP fused
+with the image features, Dense 64 twice with raw cmd before each, linear output). Same seq
+records, `--seq_offsets`, augmentation and phone path as donkey_rnn (CMDNAV_SEQ, AutopilotSeq,
+`_seq<tags>` in the file name). In `train.MSE_MODELS`: plain MSE unless `--turn_loss`; batch norm
+always (name gets `_bn`). The phone's TFLite is 2.4.0, which has **no CONV_3D or 3D pooling
+kernel**, so `models.donkey_3d` writes each Conv3D as its exact 2D equivalent: one shared Conv2D
+over each frame stacked with its two neighbours (zero frames at the ends, Conv3D's "same"
+padding), and the pool as MaxPooling2D per frame - verified equal to real Conv3D layers with the
+same weights (max difference 5e-7). Never use `tf.keras.layers.Conv3D`/`MaxPooling3D` (or other
+ops newer than TFLite 2.4) in a model meant for the phone without upgrading
+`android/robot/build.gradle`'s tensorflow-lite.
 
 **cil memory model (`--model cil_mobile_fast_memory`).** cil_mobile_fast (same CNN, cmd
 MLP, raw cmd before the later layers, linear output so it can reverse) plus donkey_memory's
@@ -161,10 +178,29 @@ for either Autopilot Session direction: `train_fwdbwd.py fwd|bwd --model cil_mob
 fwd shares `tfrecords_mem<N>/` with donkey_memory; bwd builds `dataset/tfrecords_bwd_mem<N>/`
 (windows cut at gaps > 0.5 s, `split_direction.MAX_GAP_S`, as a recording's reverses share one
 folder) and passes it with `openbot.train --records_dir`. On the phone it is a `CMDNAV_MEM`
-model; `AutopilotSessionFragment` takes a `CMDNAV` or `CMDNAV_MEM` model in either direction
-(a memory per direction for the latter), and both it and
+model; `AutopilotSessionFragment` takes a `CMDNAV`, `CMDNAV_MEM` or `CMDNAV_SEQ` model in either
+direction (a memory per direction for memory models), and both it and
 `AutopilotMemFragment` clamp throttle to >= 0 forward (<= 0 backward), since its output is
 linear. Same caveat: judge it closed loop.
+
+**cil categorical model (`--model cil_mobile_fast_cat`).** cil_mobile_fast with steering as
+classes (donkeycar's `KerasCategorical` idea, against the regressed steering settling between
+a turn and straight ahead): its `Dense(2)` becomes a softmax over `models.STEER_BINS` (21,
+centres over [-1, 1]) plus a linear throttle (so it can reverse). `models.SteeringDecode`
+turns the bins into one steering value in the graph (probability-weighted mean of the argmax
+bin and its two neighbours). The Keras output is `(steering, throttle, 21 probabilities)`:
+columns 0-1 feed the usual metrics and previews (`metrics.mean_absolute_error` replaces Keras's
+for it, as the output is wider than the labels), and `losses.ce_angle` trains on the
+probabilities - the steering label made a Gaussian over the bins (`STEER_SIGMA_BINS` 1),
+cross-entropy, plus `CAT_THROTTLE_WEIGHT` (10) x squared throttle error. **No turn weight**,
+as donkeycar: the first run kept cil's w^2 (1,700x more for a hard turn than for straight)
+and never predicted the straight bins. Same records and options as cil_mobile_fast (BN, colour aug, `--flip_aug`;
+`train_fwdbwd.py fwd|bwd --model cil_mobile_fast_cat`). `utils.generate_tflite` exports only
+the first two columns, so on the phone it is a plain `CMDNAV` model, no Android change.
+`SteeringDecode` is registered with Keras; anything that loads a checkpoint must import
+`openbot.models` first. Argmax can tip between two far-apart bins when they are near-equal,
+so `check_tflite` leaves frames whose top two bins are within `TIE_MARGIN` (0.02) out of
+`match` and reports them. The same ties can make it jump frame to frame on the car.
 
 **Dataset layout.** The current models are the Autopilot Session pair, and their data lives
 in `dataset/fwdbwd/`, not in `train_data/test_data`: recordings go into `fwdbwd/inbox/`,
@@ -183,6 +219,10 @@ existing model folder unless `--resume`. `dataset/train_data/test_data` hold onl
 `--create_tf_record` path still builds from them and deletes the manifest. The indicator sets
 (`indicator_training`, `indicator_data_session_2`) are another session on another track and
 `my_dataset_1/2` are older still; all are parked in `_other_sessions/` and not trained on.
+On 2026-11-16 the robot got a new base (camera tilted a little up at the front): all data
+recorded before, `fwdbwd/` sessions 1-11 and `_other_sessions/` included, moved to
+`dataset/_archive/old_base_2026-11-16/`, and `fwdbwd/` restarted at session 1. Models
+from before then were trained on the old camera angle.
 Autopilot Session logs (the screen's Logging switch, `autopilot_<date>.zip` with
 `sensor_data/autopilotLog.txt`: per frame who drove - model/human/pause/none - and the model's
 prediction) go in `dataset/fwdbwd/autopilot_runs/`; `python autopilot_log.py report` scores
@@ -195,7 +235,20 @@ and that nothing carries over between calls (`stateless`); `train.py` runs it on
 at the end of every run. `policy/EXPERIMENTS.md` logs every dataset and trained model (models/ and
 dataset/ are gitignored); add an entry for each new run.
 
-`policy/frontend` is a separate CRA app (own `package.json`): `npm start`, `npm run build`, `npm test` inside `policy/frontend`.
+**fwdbwd web app.** `python -m openbot.server` (or `./dev.sh`) serves it at `/`:
+`openbot/server/fwdbwd.py` (aiohttp, registered in `server/main.py` before `init_api` so its
+`/` and `POST /upload` win) and `openbot/server/fwdbwd_web/` (plain ES modules, no build
+step). Phone uploads go to `dataset/fwdbwd/inbox/` (`autopilot_*` to `autopilot_runs/`; a
+setting sends them to the old `dataset/uploaded/`). Everything that changes data or trains
+runs the existing scripts as detached jobs (own session, log and exit code in
+`dataset/fwdbwd/.webapp/jobs/`), so a server restart never kills a training run; exclusive
+jobs (training, a real split) queue one at a time. Model choices and flags come from
+`train_fwdbwd.MODELS` / `train_both.MODELS`; keep `fwdbwd.OPTIONS` in step with the flags
+`train.py` accepts per model. Publish copies a checkpoint to `models/<name>.tflite`
+(`models/.published.json` remembers the source). The old prebuilt trainer UI
+(`openbot_frontend` pip package) is at `/legacy/`.
+
+`policy/frontend` is a separate CRA app (own `package.json`): `npm start`, `npm run build`, `npm test` inside `policy/frontend`. It is the source of the old UI only.
 
 ### Embedded-Linux control (`python/`)
 
