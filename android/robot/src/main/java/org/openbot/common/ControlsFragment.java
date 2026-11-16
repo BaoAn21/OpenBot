@@ -501,7 +501,12 @@ public abstract class ControlsFragment extends Fragment implements ServerListene
             String selected = parent.getItemAtPosition(position).toString();
             try {
               masterList.stream()
-                  .filter(f -> f.name.contains(selected))
+                  // Exact match: with contains(), "fwd_s1" also matched "fwd_s1-2-3" and whichever
+                  // came first in the list drove. Pushed models are listed with their extension.
+                  .filter(
+                      f ->
+                          FileUtils.nameWithoutExtension(f.name)
+                              .equals(FileUtils.nameWithoutExtension(selected)))
                   .findFirst()
                   .ifPresent(value -> setModel(value));
 

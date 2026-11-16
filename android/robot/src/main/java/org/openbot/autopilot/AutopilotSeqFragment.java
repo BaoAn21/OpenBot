@@ -63,7 +63,7 @@ public class AutopilotSeqFragment extends CameraFragment {
      * timeline, so this is what turns them into the ages we look up here. Measured across the
      * recorded sessions at 33.17ms per frame.
      */
-    private static final float DATASET_FRAME_PERIOD_MS = 1000f / 30f;
+    static final float DATASET_FRAME_PERIOD_MS = 1000f / 30f;
 
     /** Offsets to fall back on when the model name does not carry the ones it was trained with. */
     private static final int[] DEFAULT_SEQ_STRIDE = {2};
@@ -384,9 +384,9 @@ public class AutopilotSeqFragment extends CameraFragment {
      * <p>Training writes them into the model name (..._seq0-2-4-6-8_...), which is the only record
      * of them that travels with the file - the tflite itself cannot say how far apart its channels
      * were in time. A name without the tag, or one whose tag does not match the model's depth, gets
-     * the uniform fallback.
+     * the uniform fallback. Also used by {@link AutopilotSessionFragment}.
      */
-    private int[] seqOffsets(Model model, int seqLen) {
+    static int[] seqOffsets(Model model, int seqLen) {
         // The display name is what the import dialog lets you edit, so the tag can survive in
         // either place - check the name first, then the file it actually points at.
         for (String candidate : new String[] {model.name, model.path}) {
@@ -401,7 +401,7 @@ public class AutopilotSeqFragment extends CameraFragment {
         return offsets;
     }
 
-    private int[] parseOffsets(String candidate, int seqLen) {
+    private static int[] parseOffsets(String candidate, int seqLen) {
         if (candidate == null) return null;
         final Matcher matcher = Pattern.compile("_seq(\\d+(?:-\\d+)*)").matcher(candidate);
         if (!matcher.find()) return null;

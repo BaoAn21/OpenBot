@@ -3,17 +3,51 @@
 How to go from new recordings to the two Autopilot Session models:
 
 - **fwd**: `donkey_memory` (default) or `cil_mobile_fast_memory`, drives forward (model
-  type CMDNAV_MEM on the phone), `cil_mobile_fast` (CMDNAV, the single-frame baseline), or
-  `donkey_rnn` (CMDNAV_SEQ, for now only on the Autopilot Seq screen)
-- **bwd**: `cil_mobile_fast` (default), drives backward (model type CMDNAV, gets cmd 2), or
-  `cil_mobile_fast_memory` or `donkey_memory_reverse` (model type CMDNAV_MEM)
+  type CMDNAV_MEM on the phone), `cil_mobile_fast` (CMDNAV, the single-frame baseline) or
+  `cil_mobile_fast_cat` (CMDNAV), or `donkey_rnn` or `donkey_3d` (CMDNAV_SEQ)
+- **bwd**: `cil_mobile_fast` (default) or `cil_mobile_fast_cat`, drives backward (model type
+  CMDNAV, gets cmd 2), or
+  `cil_mobile_fast_memory` or `donkey_memory_reverse` (model type CMDNAV_MEM), or `donkey_rnn`
+  or `donkey_3d` (CMDNAV_SEQ)
 
 `cil_mobile_fast_memory` is cil_mobile_fast plus donkey_memory's memory of its last 3
 outputs. `donkey_memory_reverse` is donkey_memory with a tanh throttle instead of the
 sigmoid, so it can reverse (plain donkey_memory can't). `donkey_rnn` is donkeycar's rnn
 pilot with a cmd input: no memory of its own outputs, it sees the last frames instead (the
-current one and those ~100 and ~200 ms back, `--seq_offsets 0,3,6`). Pick any of them with
-`--model`.
+current one and those ~100 and ~200 ms back, `--seq_offsets 0,3,6`). `donkey_3d` is
+donkeycar's 3D CNN pilot on the same frames: plain 3D convolutions over the stack, no LSTM,
+with cil_mobile_fast's way of taking the cmd. `cil_mobile_fast_cat` is cil_mobile_fast with
+its steering picked from 21 bins (donkeycar's categorical idea) instead of regressed, turned
+back into one value inside the model, so the phone treats it as any CMDNAV model. Pick any
+of them with `--model`.
+
+## The web app (the same steps, in the browser)
+
+```bash
+cd policy
+conda activate openbot
+python -m openbot.server        # or ./dev.sh; then open http://localhost:8000/
+```
+
+- **Inbox**: the phone uploads each recording by itself (Data Logger → Save as Server,
+  this PC picked as the server), or drop the zips on the page. Every recording plays
+  (frames at their recorded timing, steering, throttle and cmd per frame, a timeline with
+  the reverse stretches shaded). **Split** previews and runs `split_direction.py`.
+- **Sessions**: notes and every recording and part, playable.
+- **Train**: direction (fwd, bwd or both), sessions, model and its options; shows the exact
+  `train_fwdbwd.py` / `train_both.py` command. Runs queue up and train one at a time, with
+  the loss curves live. They are separate processes, so they keep going when the server
+  restarts.
+- **Models**: metrics, curves, plots, check_tflite, notes, and **Publish**, which copies a
+  checkpoint into `models/<name>.tflite` for the phone to download.
+- **Autopilot runs**: drop the `autopilot_*.zip` logs, takeovers per minute per model,
+  report plots, and extract your takeovers into the inbox.
+
+Phone uploads go to `dataset/fwdbwd/inbox/` (autopilot logs to `autopilot_runs/`); the
+Inbox page can send them to the old `dataset/uploaded/` instead. The old trainer UI is at
+`/legacy/`. Job logs: `dataset/fwdbwd/.webapp/jobs/`.
+
+## On the command line
 
 Everything runs from `policy/` in the conda env:
 
@@ -61,7 +95,10 @@ python train_fwdbwd.py fwd --model cil_mobile_fast_memory   # forward, cil with 
 python train_fwdbwd.py bwd --model cil_mobile_fast_memory   # backward, cil with memory
 python train_fwdbwd.py bwd --model donkey_memory_reverse    # backward, donkey with memory
 python train_fwdbwd.py fwd --model donkey_rnn               # forward, donkey over 3 frames
+python train_fwdbwd.py bwd --model donkey_rnn               # backward, donkey over 3 frames
+python train_fwdbwd.py fwd --model donkey_3d                # forward, 3D CNN over 3 frames
 python train_fwdbwd.py fwd --model cil_mobile_fast --sessions 7   # forward, single-frame baseline
+python train_fwdbwd.py fwd --model cil_mobile_fast_cat      # forward, cil with steering bins
 python train_fwdbwd.py fwd --sessions 1 3 4          # only these sessions
 python train_fwdbwd.py bwd --sessions 1 3 --num_epochs 60   # other options go to openbot.train
 ```
@@ -70,9 +107,10 @@ python train_fwdbwd.py bwd --sessions 1 3 --num_epochs 60   # other options go t
   when the choice or the data changes, so a second run starts training right away.
   `--build_only` builds without training.
 - Settings used: `donkey_memory --color_aug --mem_len 3`, `cil_mobile_fast --batch_norm
-  --flip_aug`, `cil_mobile_fast_memory --batch_norm --flip_aug --mem_len 3`,
+  --flip_aug` (`cil_mobile_fast_cat` the same), `cil_mobile_fast_memory --batch_norm --flip_aug --mem_len 3`,
   `donkey_memory_reverse --color_aug --mem_len 3`, `donkey_rnn --seq_offsets 0,3,6`
-  (colour aug always, plain mse, `--turn_loss` and `--flip_aug` opt-in), all
+  (colour aug always, plain mse, `--turn_loss` and `--flip_aug` opt-in), `donkey_3d
+  --seq_offsets 0,3,6` (the same, plus batch norm always), all
   `--batch_size 128 --learning_rate 0.0003 --num_epochs 100 --early_stop 20`.
 - Training stops once val loss hasn't improved for 20 epochs (`--early_stop 20`), so
   100 epochs is only the upper limit. `best.tflite` is the best-val checkpoint either way.
@@ -106,10 +144,12 @@ python train_fwdbwd.py bwd --sessions 1 3 --num_epochs 60   # other options go t
   Autopilot Session spinners offer CMDNAV and CMDNAV_MEM models in both directions. The phone clamps
   throttle to >= 0 forward and <= 0 backward.
 - **donkey_rnn** has no memory, so its val numbers are honest and comparable between
-  donkey_rnn runs. On the phone it is a CMDNAV_SEQ model: drive it from the **Autopilot
-  Seq** screen (no takeover or logging there yet). If you rename the `.tflite`, keep
-  `_seq0-3-6` in the name: the screen reads the frame offsets from it and otherwise
-  assumes 0,2,4.
+  donkey_rnn runs. On the phone it is a CMDNAV_SEQ model, in either spinner of the
+  **Autopilot Session** screen (with takeover and logging) or on the Autopilot Seq screen.
+  If you rename the `.tflite`, keep `_seq0-3-6` in the name: the app reads the frame offsets
+  from it and otherwise assumes 0,2,4.
+- **donkey_3d** is the same on the phone (CMDNAV_SEQ, keep `_seq0-3-6` in the name) and shares
+  donkey_rnn's records, so a run after a donkey_rnn run on the same sessions starts at once.
 - Put `checkpoints/best.tflite` on the phone (the checkpoint with the best val loss).
   The end of the training log says whether it computes what the trained model does
   (`match: PASS`, `stateless: PASS`); `python check_tflite.py models/<folder>` checks every
@@ -137,6 +177,12 @@ python split_direction.py --note "takeovers of fwd_s1-2-3, 11-06"
 - `extract` keeps only the frames you drove, each takeover minus its first 0.3 s (your
   reaction, the car still doing what the model did) and its last 0.3 s before you let go
   (`--trim_start`, `--trim_end`). The result is a normal recording for the inbox.
+- The screen's **Throttle** spinner decides who sets the speed while a model drives; the
+  model always steers. *Model*: its own throttle. *Fixed*: one speed for every model (130 to
+  start, L3/R3 change it by 10 while autopilot is on), so takeovers per minute compare
+  steering only - use it for model comparisons. *Manual*: your trigger, like donkeycar's
+  local angle mode; only the steering stick takes over. `report` lists fixed and manual
+  runs apart, as `<model> [fixed throttle]` / `[manual throttle]`.
 - Never put a run itself in the inbox: its labels are mostly the model's own output.
   `split_direction.py` parks it in `parked/autopilot/` if you do.
 - Give the takeovers their own session, so you choose whether a model trains on them

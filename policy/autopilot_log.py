@@ -50,6 +50,11 @@ PLOT = "autopilot_report.png"
 SUFFIX = "_takeover"
 # A row counts for the time to the next one, but no longer than this (a stall, a gap).
 MAX_ROW_S = 0.5
+# A takeover with your throttle against its direction (reversing in fwd, forward in bwd) is
+# getting the car off an obstacle, not driving the track: split_direction would send the
+# reverse to the backward model and keep cmd 2 on forward frames. Past this (of 255, below
+# is stick noise) extract drops the whole takeover.
+AGAINST_DIRECTION = 20
 
 Row = namedtuple(
     "Row", "ts frame source direction model pred_s pred_t s t infer_ms memory"
@@ -69,6 +74,10 @@ def read_log(run):
             if len(fields) < 11:
                 continue
             ts, frame, source, direction, model, ps, pt, s, t, ms, mem = fields[:11]
+            # Logs from before the Throttle spinner have no 12th column (= model). A fixed or
+            # manual throttle goes into the name, so report counts those runs apart.
+            if len(fields) > 11 and model and fields[11] not in ("", "model"):
+                model = f"{model} [{fields[11]} throttle]"
             rows.append(
                 Row(
                     int(ts),
@@ -316,7 +325,8 @@ def link_or_copy(src, dst):
 
 
 def plan_extract(run, trim_start, trim_end):
-    """(kept rows, label per kept frame, human rows for ctrlLog, frame timestamps)."""
+    """(all rows, kept rows, label per kept frame, human rows for ctrlLog, frame
+    timestamps, takeovers dropped for driving against their direction)."""
     rows = read_log(run)
     _, frame_lines = read_lines(os.path.join(run, "sensor_data", "rgbFrames.txt"))
     frame_ts = {}
@@ -326,8 +336,12 @@ def plan_extract(run, trim_start, trim_end):
     images = set(os.listdir(os.path.join(run, "images")))
     previous = {b.frame: a for a, b in zip(rows, rows[1:])}
 
-    kept = []
+    kept, against = [], 0
     for seg in takeovers(rows):
+        sign = 1 if seg[0].direction == "fwd" else -1
+        if any(r.t * sign < -AGAINST_DIRECTION for r in seg):
+            against += 1
+            continue
         for r in kept_rows(seg, trim_start, trim_end):
             prev = previous.get(r.frame)
             # The label is the command sent on the frame before; it must be yours.
@@ -338,7 +352,7 @@ def plan_extract(run, trim_start, trim_end):
     # As the phone's ctrlLog has it: Vehicle's floats cast to int.
     labels = {r.frame: (int(previous[r.frame].s), int(previous[r.frame].t)) for r in kept}
     human = [r for r in rows if r.source == "human"]
-    return rows, kept, labels, human, frame_ts
+    return rows, kept, labels, human, frame_ts, against
 
 
 def write_takeover(run, out, kept, labels, human, frame_ts, trim_start, trim_end):
@@ -376,12 +390,19 @@ def write_takeover(run, out, kept, labels, human, frame_ts, trim_start, trim_end
 def extract(root, runs, trim_start, trim_end, dry_run):
     for run in runs:
         name = os.path.basename(run) + SUFFIX
-        rows, kept, labels, human, frame_ts = plan_extract(run, trim_start, trim_end)
+        if not os.path.isdir(os.path.join(run, "images")):
+            print(f"{os.path.basename(run)}: no images/ (no crops logged), skipped")
+            continue
+        rows, kept, labels, human, frame_ts, against = plan_extract(
+            run, trim_start, trim_end
+        )
         segs = takeovers(rows)
         frames = {r.frame for r in kept}
         seconds = sum(sec for r, sec in zip(rows, row_seconds(rows)) if r.frame in frames)
         print(
-            f"{os.path.basename(run)}: {len(segs)} takeovers, {len(human)} human frames, "
+            f"{os.path.basename(run)}: {len(segs)} takeovers"
+            + (f" ({against} dropped: throttle against direction)" if against else "")
+            + f", {len(human)} human frames, "
             f"{len(kept)} kept after trimming ({fmt_s(seconds)})"
         )
         where = extracted_already(root, name)

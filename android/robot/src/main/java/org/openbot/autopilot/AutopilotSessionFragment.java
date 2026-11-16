@@ -38,6 +38,7 @@ import org.openbot.env.BotToControllerEventBus;
 import org.openbot.env.ImageUtils;
 import org.openbot.tflite.Autopilot;
 import org.openbot.tflite.AutopilotMem;
+import org.openbot.tflite.AutopilotSeq;
 import org.openbot.tflite.Model;
 import org.openbot.tflite.Network;
 import org.openbot.utils.ConnectionUtils;
@@ -50,9 +51,10 @@ import timber.log.Timber;
 
 /**
  * A full autopilot run on a track that has to be driven both ways: one model drives forward and
- * another backward, each either a single-frame model ({@code CMDNAV}, e.g. cil_mobile_fast) or a
- * memory model ({@code CMDNAV_MEM}, e.g. donkey_memory, cil_mobile_fast_memory). Both are loaded up
- * front so a switch is instant, but only the active one runs on a frame.
+ * another backward, each a single-frame model ({@code CMDNAV}, e.g. cil_mobile_fast), a memory
+ * model ({@code CMDNAV_MEM}, e.g. donkey_memory, cil_mobile_fast_memory) or a frame-stack model
+ * ({@code CMDNAV_SEQ}, donkey_rnn). Both are loaded up front so a switch is instant, but only the
+ * active one runs on a frame.
  *
  * <p>Which one drives follows the indicator: REVERSE means backward, anything else forward. The
  * on-screen button, the gamepad's triangle and the phone/web controllers all switch it that way,
@@ -71,10 +73,23 @@ import timber.log.Timber;
  * and the active direction's memory follows what the car does. Once the stick has been centred for
  * {@link #TAKEOVER_RELEASE_MS} the models drive again.
  *
+ * <p>The Throttle spinner picks who sets the throttle while a model drives; the model always
+ * steers. MODEL is the model's own throttle. FIXED is one speed for every model ({@link
+ * #FIXED_THROTTLE_DEFAULT}, changed in steps with L3/R3 while autopilot is on), so runs compare
+ * steering only. MANUAL is the gamepad's throttle (trigger or stick, as the drive mode says), like
+ * donkeycar's local angle mode: there only the steering stick takes over. Both clamp to the
+ * direction as the model's throttle is clamped, so backward in MANUAL is the left trigger.
+ *
  * <p>The Logging switch (or the gamepad's x) records the run with a {@link SessionLog}: the data
  * logger's files for every inferred frame, plus who drove it and what the model predicted.
  *
- * <p>Both spinners offer CMDNAV and CMDNAV_MEM models. Backward needs a model that can reverse - a
+ * <p>A CMDNAV_SEQ model gets a {@link FrameHistory} of its own that every camera frame goes into,
+ * as on the Autopilot Seq screen, so its stack holds frames of the ages it was trained with (read
+ * from the {@code _seq<offsets>} tag in its name) however long inference takes. No reset on a
+ * switch: the stop is longer than the stack reaches back, so the first stack after it holds only
+ * frames of the standing car.
+ *
+ * <p>Both spinners offer CMDNAV, CMDNAV_MEM and CMDNAV_SEQ models. Backward needs a model that can reverse - a
  * donkey_memory model there would only stand still, its sigmoid throttle clamped to 0; use
  * donkey_memory_reverse (tanh throttle) instead.
  */
@@ -93,6 +108,21 @@ public class AutopilotSessionFragment extends CameraFragment {
     /** After the stick is back in the centre, how long until the models drive again. */
     private static final long TAKEOVER_RELEASE_MS = 300;
 
+    /** Who sets the throttle while a model drives, in the order of R.array.throttle_modes. */
+    private enum ThrottleMode {
+        MODEL,
+        FIXED,
+        MANUAL
+    }
+
+    /**
+     * FIXED mode's throttle at start, raw units: about the median of the forward recordings of
+     * sessions 4-9 (127). Backward drives at the same speed, negated.
+     */
+    private static final int FIXED_THROTTLE_DEFAULT = 130;
+
+    private static final int FIXED_THROTTLE_STEP = 10;
+
     private FragmentAutopilotSessionBinding binding;
     private Handler handler;
     private HandlerThread handlerThread;
@@ -109,6 +139,11 @@ public class AutopilotSessionFragment extends CameraFragment {
     private Network backwardNet;
     private Crop forwardCrop;
     private Crop backwardCrop;
+
+    /** A CMDNAV_SEQ model's frame history and stack, per direction; null for other models. */
+    private volatile SeqInput forwardSeq;
+
+    private volatile SeqInput backwardSeq;
 
     /**
      * A forward memory model's previous outputs, {@code [s, t] * memLen} oldest first, as in {@link
@@ -138,6 +173,12 @@ public class AutopilotSessionFragment extends CameraFragment {
     /** You drive until then: MAX_VALUE while the stick is off centre. */
     private volatile long humanUntilMs = 0;
 
+    /** Set on the UI thread, read on the inference thread. */
+    private volatile ThrottleMode throttleMode = ThrottleMode.MODEL;
+
+    /** FIXED mode's throttle, a magnitude: forward drives at +, backward at -. */
+    private volatile int fixedThrottle = FIXED_THROTTLE_DEFAULT;
+
     /** Non-null while the run is logged. Read once per frame on the inference thread. */
     @Nullable private volatile SessionLog sessionLog;
 
@@ -152,6 +193,40 @@ public class AutopilotSessionFragment extends CameraFragment {
     private int numThreads = -1;
 
     /** A model's input bitmap and the frame-to-input transform; the two models can differ. */
+    /**
+     * A CMDNAV_SEQ model's input: every camera frame cropped into a {@link FrameHistory}, and the
+     * stack sampled out of it at the ages the model was trained with, as on the Autopilot Seq
+     * screen. {@link #record} runs on the camera thread, the history's fill on the inference thread
+     * (FrameHistory is synchronized).
+     */
+    private static final class SeqInput {
+        final Crop crop;
+        final FrameHistory history;
+        final float[] agesMs;
+        final int[][] stack;
+
+        SeqInput(Model model, AutopilotSeq net, int frameWidth, int frameHeight, int sensorOrientation) {
+            crop = new Crop(net, frameWidth, frameHeight, sensorOrientation);
+            final int seqLen = net.getSeqLen();
+            final int[] offsets = AutopilotSeqFragment.seqOffsets(model, seqLen);
+            agesMs = new float[seqLen];
+            for (int i = 0; i < seqLen; ++i) {
+                agesMs[i] = offsets[i] * AutopilotSeqFragment.DATASET_FRAME_PERIOD_MS;
+            }
+            final int numPixels = net.getImageSizeX() * net.getImageSizeY();
+            stack = new int[seqLen][numPixels];
+            // Room for the deepest offset several times over, as on the Autopilot Seq screen.
+            history = new FrameHistory(offsets[seqLen - 1] * 3 + 5, numPixels);
+            Timber.d(
+                    "%s: stack of %d frames, offsets %s, spanning %.0fms",
+                    model.name, seqLen, Arrays.toString(offsets), agesMs[seqLen - 1]);
+        }
+
+        void record(long timestampMs, Bitmap frame) {
+            history.add(timestampMs, crop.from(frame));
+        }
+    }
+
     private static final class Crop {
         final Bitmap bitmap;
         final Matrix transform;
@@ -211,7 +286,9 @@ public class AutopilotSessionFragment extends CameraFragment {
         List<String> sessionModels =
                 getModelNames(
                         f ->
-                                (f.type.equals(Model.TYPE.CMDNAV) || f.type.equals(Model.TYPE.CMDNAV_MEM))
+                                (f.type.equals(Model.TYPE.CMDNAV)
+                                                || f.type.equals(Model.TYPE.CMDNAV_MEM)
+                                                || f.type.equals(Model.TYPE.CMDNAV_SEQ))
                                         && f.pathType != Model.PATH_TYPE.URL);
         List<String> forwardModels = sessionModels;
         List<String> backwardModels = sessionModels;
@@ -232,6 +309,7 @@ public class AutopilotSessionFragment extends CameraFragment {
                 backwardModels,
                 preferencesManager.getAutopilotSessionBackwardModel());
         initServerSpinner(binding.serverSpinner);
+        initThrottleModeSpinner();
         setAnalyserResolution(Enums.Preview.HD.getValue());
         binding.deviceSpinner.setOnItemSelectedListener(
                 new AdapterView.OnItemSelectedListener() {
@@ -330,13 +408,32 @@ public class AutopilotSessionFragment extends CameraFragment {
                     @Override
                     public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
                         String name = parent.getItemAtPosition(position).toString();
+                        // The list already holds only session models; match the name exactly.
                         masterList.stream()
-                                .filter(
-                                        f ->
-                                                f.type.equals(Model.TYPE.CMDNAV_MEM)
-                                                        && FileUtils.nameWithoutExtension(f.name).equals(name))
+                                .filter(f -> FileUtils.nameWithoutExtension(f.name).equals(name))
                                 .findFirst()
                                 .ifPresent(model -> setForwardModel(model));
+                    }
+
+                    @Override
+                    public void onNothingSelected(AdapterView<?> parent) {
+                    }
+                });
+    }
+
+    /** The Throttle spinner; starts on MODEL every time the screen opens. */
+    private void initThrottleModeSpinner() {
+        ArrayAdapter<CharSequence> adapter =
+                ArrayAdapter.createFromResource(
+                        requireContext(), R.array.throttle_modes, R.layout.spinner_item);
+        adapter.setDropDownViewResource(android.R.layout.simple_dropdown_item_1line);
+        binding.throttleModeSpinner.setAdapter(adapter);
+        binding.throttleModeSpinner.setOnItemSelectedListener(
+                new AdapterView.OnItemSelectedListener() {
+                    @Override
+                    public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                        throttleMode = ThrottleMode.values()[position];
+                        updateIndicatorInfo();
                     }
 
                     @Override
@@ -372,6 +469,7 @@ public class AutopilotSessionFragment extends CameraFragment {
             if (forwardNet != null) forwardNet.close();
             forwardNet = null;
             forwardCrop = null;
+            forwardSeq = null;
             forwardMemory = null;
             forwardMemoryText = "";
             if (forwardModel != null) {
@@ -385,6 +483,13 @@ public class AutopilotSessionFragment extends CameraFragment {
                         forwardCrop = new Crop(net, frameWidth, frameHeight, sensorOrientation);
                         forwardMemory = new float[2 * net.getMemLen()];
                         showMemory(false, forwardMemory.clone());
+                        forwardNet = net;
+                    } else if (forwardModel.type.equals(Model.TYPE.CMDNAV_SEQ)) {
+                        AutopilotSeq net =
+                                new AutopilotSeq(requireActivity(), forwardModel, device, numThreads);
+                        forwardCrop = new Crop(net, frameWidth, frameHeight, sensorOrientation);
+                        forwardSeq =
+                                new SeqInput(forwardModel, net, frameWidth, frameHeight, sensorOrientation);
                         forwardNet = net;
                     } else {
                         Autopilot net = new Autopilot(requireActivity(), forwardModel, device, numThreads);
@@ -400,6 +505,7 @@ public class AutopilotSessionFragment extends CameraFragment {
             if (backwardNet != null) backwardNet.close();
             backwardNet = null;
             backwardCrop = null;
+            backwardSeq = null;
             backwardMemory = null;
             backwardMemoryText = "";
             if (backwardModel != null) {
@@ -413,6 +519,13 @@ public class AutopilotSessionFragment extends CameraFragment {
                         backwardCrop = new Crop(net, frameWidth, frameHeight, sensorOrientation);
                         backwardMemory = new float[2 * net.getMemLen()];
                         showMemory(true, backwardMemory.clone());
+                        backwardNet = net;
+                    } else if (backwardModel.type.equals(Model.TYPE.CMDNAV_SEQ)) {
+                        AutopilotSeq net =
+                                new AutopilotSeq(requireActivity(), backwardModel, device, numThreads);
+                        backwardCrop = new Crop(net, frameWidth, frameHeight, sensorOrientation);
+                        backwardSeq =
+                                new SeqInput(backwardModel, net, frameWidth, frameHeight, sensorOrientation);
                         backwardNet = net;
                     } else {
                         Autopilot net = new Autopilot(requireActivity(), backwardModel, device, numThreads);
@@ -494,10 +607,22 @@ public class AutopilotSessionFragment extends CameraFragment {
 
     @Override
     protected void processKeyEvent(KeyEvent keyCode) {
-        if (binding.autoSwitch.isChecked()
-                && (keyCode.getKeyCode() == KeyEvent.KEYCODE_BUTTON_THUMBL
-                || keyCode.getKeyCode() == KeyEvent.KEYCODE_BUTTON_THUMBR)) {
-            audioPlayer.playFromString("Autopilot active. Cannot change speed mode.");
+        final boolean thumbL = keyCode.getKeyCode() == KeyEvent.KEYCODE_BUTTON_THUMBL;
+        final boolean thumbR = keyCode.getKeyCode() == KeyEvent.KEYCODE_BUTTON_THUMBR;
+        if (binding.autoSwitch.isChecked() && (thumbL || thumbR)) {
+            if (throttleMode == ThrottleMode.FIXED) {
+                // The speed buttons change the fixed throttle instead of the speed mode.
+                fixedThrottle =
+                        Math.max(
+                                FIXED_THROTTLE_STEP,
+                                Math.min(
+                                        (int) Control.MAX,
+                                        fixedThrottle + (thumbR ? FIXED_THROTTLE_STEP : -FIXED_THROTTLE_STEP)));
+                audioPlayer.playFromString("Throttle " + fixedThrottle);
+                updateIndicatorInfo();
+            } else {
+                audioPlayer.playFromString("Autopilot active. Cannot change speed mode.");
+            }
         } else {
             super.processKeyEvent(keyCode);
         }
@@ -593,9 +718,13 @@ public class AutopilotSessionFragment extends CameraFragment {
         }
         // Any stick input takes over from the models until the stick has been centred for
         // TAKEOVER_RELEASE_MS. drive() keeps sending it each frame, so the models can't
-        // overwrite it.
+        // overwrite it. In MANUAL throttle mode the throttle is yours anyway (drive() reads it
+        // from humanControl), so only steering takes over.
         humanControl = control;
-        if (control.getSteering() != 0 || control.getThrottle() != 0) {
+        final boolean takesOver =
+                control.getSteering() != 0
+                        || (throttleMode != ThrottleMode.MANUAL && control.getThrottle() != 0);
+        if (takesOver) {
             humanUntilMs = Long.MAX_VALUE;
             super.handleJoystickControl(control); // right away, not on the next frame
         } else if (humanUntilMs == Long.MAX_VALUE) {
@@ -642,8 +771,12 @@ public class AutopilotSessionFragment extends CameraFragment {
             color = R.color.green;
         }
         final String memoryText = reverse ? backwardMemoryText : forwardMemoryText;
-        binding.indicatorInfo.setText(
-                memoryText.isEmpty() ? getString(label) : getString(label) + "\n" + memoryText);
+        String text = memoryText.isEmpty() ? getString(label) : getString(label) + "\n" + memoryText;
+        if (throttleMode == ThrottleMode.FIXED)
+            text += "\n" + getString(R.string.throttle_info_fixed, fixedThrottle);
+        else if (throttleMode == ThrottleMode.MANUAL)
+            text += "\n" + getString(R.string.throttle_info_manual);
+        binding.indicatorInfo.setText(text);
         binding.indicatorInfo.setTextColor(ContextCompat.getColor(requireContext(), color));
     }
 
@@ -744,6 +877,15 @@ public class AutopilotSessionFragment extends CameraFragment {
         if (!frameConfigured) configureFrame();
 
         ++frameNum;
+        // Every frame into the frame-stack models' histories, here on the camera thread: the
+        // bitmap is overwritten by the next frame, and recording only the frames inference runs on
+        // would space the stack by inference time instead of by the offsets it was trained with.
+        final long nowMs = SystemClock.elapsedRealtime();
+        final SeqInput fwdSeq = forwardSeq;
+        final SeqInput bwdSeq = backwardSeq;
+        if (fwdSeq != null) fwdSeq.record(nowMs, bitmap);
+        if (bwdSeq != null) bwdSeq.record(nowMs, bitmap);
+
         if (binding != null && binding.autoSwitch.isChecked()) {
             // If network is busy, return.
             if (computingNetwork) {
@@ -800,6 +942,7 @@ public class AutopilotSessionFragment extends CameraFragment {
         final Network net = reverse ? backwardNet : forwardNet;
         final Crop crop = reverse ? backwardCrop : forwardCrop;
         final float[] memory = reverse ? backwardMemory : forwardMemory;
+        final SeqInput seq = reverse ? backwardSeq : forwardSeq;
         // The frame as the active model sees it; null without a model for this direction.
         final Bitmap input = crop == null ? null : crop.from(frame);
         // What a memory model sees on this frame, before this frame's command goes in.
@@ -818,7 +961,7 @@ public class AutopilotSessionFragment extends CameraFragment {
             if (log != null && net != null) {
                 // Not driving, only logged: what the model would have done in your place.
                 final long start = SystemClock.elapsedRealtimeNanos();
-                prediction = predict(net, input, memory);
+                prediction = predict(net, input, memory, seq);
                 inferenceNs = SystemClock.elapsedRealtimeNanos() - start;
             }
             if (memory != null) {
@@ -837,13 +980,9 @@ public class AutopilotSessionFragment extends CameraFragment {
         } else {
             source = "model";
             final long start = SystemClock.elapsedRealtimeNanos();
-            prediction = predict(net, input, memory);
+            prediction = predict(net, input, memory, seq);
             inferenceNs = SystemClock.elapsedRealtimeNanos() - start;
-            // The switch decides the direction, the model only how much: cil_mobile_fast_memory's
-            // throttle is linear, never let it change direction mid-run.
-            final float throttle =
-                    reverse ? Math.min(prediction.getThrottle(), 0) : Math.max(prediction.getThrottle(), 0);
-            sent = new Control(prediction.getSteering(), throttle);
+            sent = new Control(prediction.getSteering(), throttleFor(prediction, reverse));
             if (memory != null) {
                 pushMemory(memory, sent);
                 showMemory(reverse, memory.clone());
@@ -857,7 +996,7 @@ public class AutopilotSessionFragment extends CameraFragment {
                     frameNum,
                     String.format(
                             Locale.US,
-                            "%s,%s,%s,%s,%s,%.1f,%.1f,%s,%s",
+                            "%s,%s,%s,%s,%s,%.1f,%.1f,%s,%s,%s",
                             source,
                             reverse ? "bwd" : "fwd",
                             net == null || model == null ? "" : FileUtils.nameWithoutExtension(model.name),
@@ -866,13 +1005,40 @@ public class AutopilotSessionFragment extends CameraFragment {
                             sent.getSteering(),
                             sent.getThrottle(),
                             prediction == null ? "" : String.format(Locale.US, "%.1f", inferenceNs / 1e6),
-                            memoryText(seen)),
+                            memoryText(seen),
+                            throttleMode.name().toLowerCase(Locale.US)),
                     input == null ? null : input.copy(Bitmap.Config.ARGB_8888, false));
         }
     }
 
+    /**
+     * The throttle sent while a model drives, by {@link #throttleMode}. The switch decides the
+     * direction, the throttle only how much: cil_mobile_fast_memory's throttle is linear, and a
+     * gamepad can push either way, so it never changes direction mid-run. Inference thread.
+     */
+    private float throttleFor(Control prediction, boolean reverse) {
+        final float throttle;
+        switch (throttleMode) {
+            case FIXED:
+                throttle = reverse ? -fixedThrottle : fixedThrottle;
+                break;
+            case MANUAL:
+                throttle = humanControl.getThrottle();
+                break;
+            default:
+                throttle = prediction.getThrottle();
+        }
+        return reverse ? Math.min(throttle, 0) : Math.max(throttle, 0);
+    }
+
     /** A model's raw output for one frame, before the throttle clamp. Inference thread. */
-    private Control predict(Network net, Bitmap input, @Nullable float[] memory) {
+    private Control predict(
+            Network net, Bitmap input, @Nullable float[] memory, @Nullable SeqInput seq) {
+        if (net instanceof AutopilotSeq) {
+            // Nothing recorded yet only right after the model was loaded: stand still.
+            if (seq == null || seq.history.fill(seq.agesMs, seq.stack) < 0) return new Control(0, 0);
+            return ((AutopilotSeq) net).recognizeImage(seq.stack, vehicle.getIndicator());
+        }
         return net instanceof AutopilotMem
                 ? ((AutopilotMem) net).recognizeImage(input, memory, vehicle.getIndicator())
                 : ((Autopilot) net).recognizeImage(input, vehicle.getIndicator());

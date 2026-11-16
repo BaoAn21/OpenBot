@@ -49,7 +49,7 @@ class SessionLog {
 
     static final String HEADER =
             "timestamp[ns],frame,source,direction,model,pred_steering,pred_throttle,"
-                    + "steering,throttle,inference[ms],memory";
+                    + "steering,throttle,inference[ms],memory,throttle_mode";
 
     private final Activity activity;
     private final Vehicle vehicle;
