@@ -21,7 +21,7 @@ function form(opts, onQueued) {
     sessions: new Set(JSON.parse(localStorage.getItem('fb.sessions') || '[]')),
     model: null,
     options: new Set(),
-    mem_len: 3, seq_offsets: '0,3,6',
+    mem_len: 3, seq_offsets: '0,3,6', turn_floor: opts.turn_floor,
     ...opts.common,
     run_name: '', resume: false,
   };
@@ -32,9 +32,16 @@ function form(opts, onQueued) {
   const payload = () => ({
     direction: st.direction, model: st.model, sessions: [...st.sessions],
     options: [...st.options], mem_len: st.mem_len, seq_offsets: st.seq_offsets,
+    turn_floor: turnFloorOn() ? st.turn_floor : null,
     num_epochs: st.num_epochs, early_stop: st.early_stop, batch_size: st.batch_size, learning_rate: st.learning_rate,
     run_name: st.run_name, resume: st.resume,
   });
+
+  // The turn-weighted loss's floor: for the models on that loss (MSE ones once --turn_loss is ticked).
+  const turnFloorOn = () => {
+    const f = opts.directions[st.direction][st.model]?.turn_floor;
+    return f === 'turn_loss' ? st.options.has('turn_loss') : !!f;
+  };
 
   function schedulePreview() {
     clearTimeout(previewTimer);
@@ -76,6 +83,12 @@ function form(opts, onQueued) {
     const chosen = opts.sessions.filter((s) => st.sessions.has(s.number));
     const tot = chosen.reduce((a, s) => { const [tr, te] = countFor(s, st.direction); return [a[0] + tr, a[1] + te]; }, [0, 0]);
 
+    const optionChecks = (entries) => entries.map(([k, desc]) => h('label', { class: 'check' },
+      h('input', { type: 'checkbox', checked: st.options.has(k), onchange: (e) => { e.target.checked ? st.options.add(k) : st.options.delete(k); k === 'turn_loss' ? draw() : schedulePreview(); } }),
+      h('span', {}, h('code', {}, '--' + k), ' ', h('span', { class: 'dim' }, desc))));
+    const lockedCheck = (label, desc) => h('label', { class: 'check', title: 'always on for this model in the fwd/bwd flow' },
+      h('input', { type: 'checkbox', checked: true, disabled: true }),
+      h('span', {}, h('code', {}, label), ' ', h('span', { class: 'dim' }, desc), ' ', h('span', { class: 'muted' }, '(always on)')));
     const num = (key, step = 1) => h('input', { type: 'number', value: st[key], step, onchange: (e) => { st[key] = e.target.value; schedulePreview(); } });
 
     clear(box,
@@ -95,10 +108,18 @@ function form(opts, onQueued) {
         Object.keys(models).map((name) => h('option', { value: name, selected: name === st.model }, name))),
       h('div', { class: 'dim', style: { fontSize: '12.5px', margin: '6px 0' } }, MODEL_INFO[st.model] || '', ' ',
         h('span', { class: 'tag' }, `phone: ${phoneType(st.model)}`)),
-      m.fixed.length ? h('div', { class: 'row', style: { margin: '6px 0' } }, h('span', { class: 'muted' }, 'always:'), m.fixed.map((f) => h('span', { class: 'tag' }, f))) : null,
-      Object.entries(m.options).map(([k, desc]) => h('label', { class: 'check' },
-        h('input', { type: 'checkbox', checked: st.options.has(k), onchange: (e) => { e.target.checked ? st.options.add(k) : st.options.delete(k); schedulePreview(); } }),
-        h('span', {}, h('code', {}, '--' + k), ' ', h('span', { class: 'dim' }, desc)))),
+      h('h3', {}, 'Augmentation'),
+      // On in this flow whatever you pick: the script's flags, and train.py's own colour jitter.
+      m.builtin_color ? lockedCheck('colour jitter', 'hue / saturation / brightness, built into train.py for this model') : null,
+      m.fixed.filter((f) => m.augmentations.includes(f)).map((f) => lockedCheck('--' + f, f === 'flip_aug' ? 'mirror images and steering' : 'hue / saturation / brightness')),
+      optionChecks(Object.entries(m.options).filter(([k]) => m.augmentations.includes(k))),
+      m.fixed.some((f) => !m.augmentations.includes(f))
+        ? h('div', { class: 'row', style: { margin: '10px 0 2px' } }, h('span', { class: 'muted' }, 'always:'), m.fixed.filter((f) => !m.augmentations.includes(f)).map((f) => h('span', { class: 'tag' }, f)))
+        : null,
+      Object.entries(m.options).some(([k]) => !m.augmentations.includes(k)) ? h('h3', {}, 'Options') : null,
+      optionChecks(Object.entries(m.options).filter(([k]) => !m.augmentations.includes(k))),
+      turnFloorOn() ? h('div', { class: 'field' }, h('label', {}, 'Turn floor'), h('div', { class: 'row' }, num('turn_floor', 0.05),
+        h('span', { class: 'muted' }, `weight 2|steering| + floor; ${opts.turn_floor} = default, 0.5 or 1 count straights more (less wiggle)`))) : null,
       m.memory ? h('div', { class: 'field' }, h('label', {}, 'Memory length'), num('mem_len')) : null,
       m.seq ? h('div', { class: 'field' }, h('label', {}, 'Frame offsets'),
         h('input', { type: 'text', value: st.seq_offsets, onchange: (e) => { st.seq_offsets = e.target.value; schedulePreview(); } })) : null,

@@ -111,6 +111,7 @@ export async function render(view, params) {
           h('div', { class: 'field' }, h('label', {}, 'Checkpoint'), ckpt),
           h('div', { class: 'field' }, h('label', {}, 'File name'), h('div', { class: 'row' }, target, h('span', { class: 'muted' }, '.tflite'))),
           m.seq_tag ? h('div', { class: 'muted', style: { fontSize: '12px' } }, `${m.seq_tag} is kept in the name: the phone reads the frame offsets from it.`) : null,
+          m.steer_only ? h('div', { class: 'muted', style: { fontSize: '12px' } }, '_steeronly is kept in the name: the phone drives it only with Fixed or Manual throttle.') : null,
           m.phone_type !== 'CMDNAV' ? h('div', { class: 'note warn', style: { margin: '6px 0' } }, `The phone adds downloads as CMDNAV: set this one to ${m.phone_type} in Model Management.`) : null,
           h('div', { class: 'row', style: { marginTop: '8px' } }, h('button', { class: 'primary', disabled: !m.tflite.length, onclick: () => publish(false) }, 'Publish')),
           h('div', { style: { marginTop: '8px' } }, pubList),

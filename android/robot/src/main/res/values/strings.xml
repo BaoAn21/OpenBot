@@ -255,6 +255,7 @@
     </string-array>
     <string name="throttle_info_fixed">THROTTLE FIXED %d</string>
     <string name="throttle_info_manual">THROTTLE MANUAL</string>
+    <string name="steer_only_needs_throttle">Steering-only model: it stands still on Model throttle. Pick Fixed or Manual.</string>
     <string name="tile_object_nav">Object Tracking</string>
     <string name="tile_point_goal_navigation">Point Goal Navigation</string>
     <string name="tile_model_management">Model Management</string>

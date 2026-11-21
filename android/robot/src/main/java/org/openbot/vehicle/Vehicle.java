@@ -17,7 +17,7 @@ import org.openbot.utils.Enums;
 
 public class Vehicle {
 
-  private final Noise noise = new Noise(1000, 2000, 5000);
+  private final Noise noise = new Noise(1000, 2000, 1000);
   private boolean noiseEnabled = false;
 
   private int indicator = 0;

@@ -64,14 +64,25 @@ MEMORY_MODELS = ("donkey_memory", "donkey_memory_reverse", "cil_mobile_fast_memo
 SEQ_MODELS = ("donkey_rnn", "donkey_3d")
 DONKEY_MODELS = ("donkey_memory", "donkey_memory_reverse")
 MSE_MODELS = DONKEY_MODELS + SEQ_MODELS
+# train.py refuses --steer_only for memory models and cil_mobile_fast_cat.
+STEER_ONLY_MODELS = ("cil_mobile_fast", "pilot_net") + SEQ_MODELS
+# Trained on the turn-weighted loss, so --turn_floor applies (MSE_MODELS only with
+# --turn_loss; cil_mobile_fast_cat is on ce_angle).
+TURN_FLOOR = 0.05
 # Opt-in openbot.train flags per model, as train.py accepts them; flags the script
 # already passes for a model (MODELS[direction][model]) show as fixed instead.
+ALL_MODELS = tuple(sorted({m for models in DIRECTIONS.values() for m in models}))
 OPTIONS = {
     "flip_aug": ("mirror images and steering", DONKEY_MODELS + SEQ_MODELS),
+    "tilt_aug": ("rotate images up to ±5° (camera roll, not up/down pitch)", ALL_MODELS),
+    "cmd_aug": ("noise on the indicator (cmd) input", tuple(m for m in ALL_MODELS if m not in DONKEY_MODELS)),
     "mem_aug": ("make the memory unreliable (zeroed or offset)", MEMORY_MODELS),
     "turn_loss": ("turn-weighted loss instead of plain MSE", MSE_MODELS),
     "mem_cmd": ("feed the indicator to the memory model", DONKEY_MODELS),
+    "steer_only": ("train steering only; drive it with Fixed or Manual throttle", STEER_ONLY_MODELS),
 }
+# Which of the flags above (and of the scripts' fixed flags) are augmentations.
+AUGMENTATIONS = ("flip_aug", "color_aug", "tilt_aug", "cmd_aug", "mem_aug")
 COMMON = {"num_epochs": 100, "early_stop": 20, "batch_size": 128, "learning_rate": 0.0003}
 KNOWN_MODELS = sorted(
     {m for models in DIRECTIONS.values() for m in models} | {"pilot_net_seq", "cil_mobile"},
@@ -364,6 +375,7 @@ def parse_model_name(name):
         "sessions": [int(s) for s in sessions[1].split("-")] if sessions else [],
         "phone_type": phone,
         "seq_tag": (re.search(r"_seq\d+(?:-\d+)*", name) or [None])[0],
+        "steer_only": "_steeronly" in name,
     }
 
 
@@ -433,7 +445,13 @@ def published():
 def model_summary(name):
     folder = os.path.join(models_dir, name)
     log = os.path.join(folder, "logs", "log.csv")
-    stamp = (os.path.getmtime(folder), os.path.getmtime(log) if os.path.isfile(log) else 0)
+    ckpt = os.path.join(folder, "checkpoints")
+    # checkpoints/ too: the .tflite files are exported after the last log.csv line.
+    stamp = (
+        os.path.getmtime(folder),
+        os.path.getmtime(log) if os.path.isfile(log) else 0,
+        os.path.getmtime(ckpt) if os.path.isdir(ckpt) else 0,
+    )
     hit = _model_cache.get(name)
     if hit and hit[0] == stamp:
         return hit[1]
@@ -847,8 +865,13 @@ def train_options():
             m: {
                 "fixed": [a.lstrip("-") for a in flags],
                 "options": {k: v[0] for k, v in OPTIONS.items() if m in v[1] and f"--{k}" not in flags},
+                "augmentations": list(AUGMENTATIONS),
+                # train.py jitters colour for every model but the donkey_memory ones by itself
+                "builtin_color": m not in DONKEY_MODELS,
                 "memory": m in MEMORY_MODELS,
                 "seq": m in SEQ_MODELS,
+                # "turn_loss": only once --turn_loss is ticked
+                "turn_floor": False if m == "cil_mobile_fast_cat" else "turn_loss" if m in MSE_MODELS else True,
             }
             for m, flags in models.items()
             if m != "pilot_net_seq"
@@ -856,6 +879,7 @@ def train_options():
     return {
         "directions": out,
         "common": COMMON,
+        "turn_floor": TURN_FLOOR,
         "sessions": [{"number": s["number"], "note": s["note"], "counts": s["counts"]} for s in sessions],
     }
 
@@ -887,6 +911,16 @@ def train_command(p):
         if not re.fullmatch(r"\d+(,\d+)*", offsets):
             raise web.HTTPBadRequest(text="seq offsets look like 0,3,6")
         cmd += ["--seq_offsets", offsets]
+    if p.get("turn_floor") not in (None, "") and float(p["turn_floor"]) != TURN_FLOOR:
+        floor = float(p["turn_floor"])
+        if model == "cil_mobile_fast_cat" or (model in MSE_MODELS and "--turn_loss" not in cmd):
+            raise web.HTTPBadRequest(
+                text="the turn floor needs the turn-weighted loss: "
+                + ("tick --turn_loss" if model in MSE_MODELS else f"{model} doesn't use it")
+            )
+        if floor <= 0:
+            raise web.HTTPBadRequest(text="turn floor must be > 0")
+        cmd += ["--turn_floor", f"{floor:g}"]
     for key, default in COMMON.items():
         value = p.get(key)
         if value in (None, ""):
@@ -1116,9 +1150,12 @@ async def api_model_publish(request):
         target = target[: -len(".tflite")]
     if not NAME_RE.match(target):
         raise web.HTTPBadRequest(text="name: letters, digits, _ . - only")
-    seq = parse_model_name(name)["seq_tag"]
+    parsed = parse_model_name(name)
+    seq = parsed["seq_tag"]
     if seq and not re.search(r"_seq\d", target):
         target += seq  # the phone reads the frame offsets from the file name
+    if parsed["steer_only"] and "steeronly" not in target:
+        target += "_steeronly"  # the phone won't drive it on its untrained throttle
     dst = os.path.join(models_dir, target + ".tflite")
     if os.path.exists(dst) and not p.get("overwrite"):
         raise web.HTTPConflict(text=f"{target}.tflite is already published")

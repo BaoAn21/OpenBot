@@ -37,6 +37,7 @@ from train_fwdbwd import (
     DATASET_DIR,
     POLICY_DIR,
     SPLITS,
+    TRAIN_ENV,
     build_plain,
     folders,
     sessions_in,
@@ -191,7 +192,7 @@ def main():
     cmd += train_extra  # later options win in argparse
     print(" ".join(cmd[1:]))
     # openbot.train copies manifest.txt into the model folder as data_manifest.txt.
-    sys.exit(subprocess.run(cmd, cwd=POLICY_DIR).returncode)
+    sys.exit(subprocess.run(cmd, cwd=POLICY_DIR, env=TRAIN_ENV).returncode)
 
 
 if __name__ == "__main__":

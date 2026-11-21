@@ -54,6 +54,12 @@ def weighted_mse_angle(y_gt, y_pred):
     return angle_weight(y_gt) * mse_angle(y_gt, y_pred)
 
 
+# The constant in sq_weighted_mse_angle's weight: a straight frame weighs 0.05^2 against
+# 2.05^2 at full lock, ~1,700x less, so the model is barely trained to hold 0 on a
+# straight (fwd_s1-2 cil predicted ~90/255 there).
+TURN_FLOOR = 0.05
+
+
 def sq_weighted_mse_angle(y_true, y_pred):
     # The official OpenBot loss, ported to (steering, throttle). Upstream works on
     # (left, right) with angle = right - left; since left = t + s and right = t - s
@@ -64,10 +70,44 @@ def sq_weighted_mse_angle(y_true, y_pred):
     # Two upstream quirks are dropped: its weight |angle + 0.05| is made symmetric
     # (|angle| + 0.05), and the angle error is per sample instead of the batch mean
     # that mean_squared_error returns for a 1-D tensor.
-    weight = 2.0 * tf.math.abs(angle(y_true)) + 0.05
+    return _turn_weighted(y_true, y_pred, TURN_FLOOR)
+
+
+def _turn_weighted(y_true, y_pred, floor):
+    weight = 2.0 * tf.math.abs(angle(y_true)) + floor
     steering_err = tf.math.square(angle(y_true) - angle(y_pred))
     throttle_err = tf.math.square(throttle(y_true) - throttle(y_pred))
     return tf.math.square(weight) * (throttle_err + 5.0 * steering_err)
+
+
+def turn_weighted(floor=TURN_FLOOR):
+    # --turn_floor: sq_weighted_mse_angle with a larger constant, so straights count
+    # more (0.5: a full-lock frame weighs 26x a straight one; 1.0: 9x). The default is
+    # sq_weighted_mse_angle itself.
+    if floor == TURN_FLOOR:
+        return sq_weighted_mse_angle
+
+    def loss(y_true, y_pred):
+        return _turn_weighted(y_true, y_pred, floor)
+
+    loss.__name__ = f"sq_weighted_mse_angle_floor{floor:g}"
+    return loss
+
+
+def steer_only(loss_fn):
+    # --steer_only: loss_fn without its throttle term. The throttle label is swapped
+    # for the model's own throttle with the gradient stopped, so the throttle error and
+    # its gradient are exactly 0, and everything else - the steering term, and the turn
+    # weight, which reads only the steering label - is loss_fn's own, unchanged. For
+    # mse_raw that leaves half the steering squared error (the mean over two columns),
+    # the same steering gradient as before. Only for losses whose y_pred is
+    # (steering, throttle): not ce_angle.
+    def loss(y_true, y_pred):
+        y_true = tf.concat([y_true[:, :1], tf.stop_gradient(y_pred[:, 1:2])], axis=1)
+        return loss_fn(y_true, y_pred)
+
+    loss.__name__ = loss_fn.__name__ + "_steer_only"
+    return loss
 
 
 # cil_mobile_fast_cat: spread of the soft steering target, in bins, and the weight of the

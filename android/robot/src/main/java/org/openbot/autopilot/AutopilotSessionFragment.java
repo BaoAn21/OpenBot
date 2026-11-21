@@ -78,7 +78,9 @@ import timber.log.Timber;
  * #FIXED_THROTTLE_DEFAULT}, changed in steps with L3/R3 while autopilot is on), so runs compare
  * steering only. MANUAL is the gamepad's throttle (trigger or stick, as the drive mode says), like
  * donkeycar's local angle mode: there only the steering stick takes over. Both clamp to the
- * direction as the model's throttle is clamped, so backward in MANUAL is the left trigger.
+ * direction as the model's throttle is clamped, so backward in MANUAL is the left trigger. A model
+ * trained with --steer_only ("steeronly" in its file name) has an untrained throttle, so under
+ * MODEL it stands still and the screen says to pick FIXED or MANUAL.
  *
  * <p>The Logging switch (or the gamepad's x) records the run with a {@link SessionLog}: the data
  * logger's files for every inferred frame, plus who drove it and what the model predicted.
@@ -434,6 +436,7 @@ public class AutopilotSessionFragment extends CameraFragment {
                     public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
                         throttleMode = ThrottleMode.values()[position];
                         updateIndicatorInfo();
+                        warnIfSteerOnly();
                     }
 
                     @Override
@@ -867,6 +870,7 @@ public class AutopilotSessionFragment extends CameraFragment {
                         lastReverse = isReversing();
                         switchUntilMs = 0;
                     });
+            warnIfSteerOnly();
         }
     }
 
@@ -1026,9 +1030,26 @@ public class AutopilotSessionFragment extends CameraFragment {
                 throttle = humanControl.getThrottle();
                 break;
             default:
-                throttle = prediction.getThrottle();
+                // A steering-only model's throttle output is untrained: stand still instead.
+                throttle =
+                        isSteerOnly(reverse ? backwardModel : forwardModel) ? 0 : prediction.getThrottle();
         }
         return reverse ? Math.min(throttle, 0) : Math.max(throttle, 0);
+    }
+
+    /** Trained with --steer_only; the web app's publish keeps the tag in the file name. */
+    private static boolean isSteerOnly(@Nullable Model model) {
+        return model != null && model.name.contains("steeronly");
+    }
+
+    /** Says why the car won't move: MODEL throttle with a steering-only model. UI thread. */
+    private void warnIfSteerOnly() {
+        if (binding.autoSwitch.isChecked()
+                && throttleMode == ThrottleMode.MODEL
+                && (isSteerOnly(forwardModel) || isSteerOnly(backwardModel))) {
+            Toast.makeText(requireContext(), R.string.steer_only_needs_throttle, Toast.LENGTH_LONG)
+                    .show();
+        }
     }
 
     /** A model's raw output for one frame, before the throttle clamp. Inference thread. */

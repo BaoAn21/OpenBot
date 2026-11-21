@@ -61,6 +61,12 @@ DATASET_DIR = os.path.join(POLICY_DIR, "dataset")
 ROOT = os.path.join(DATASET_DIR, "fwdbwd")
 SPLITS = (("train", "train_data", "train.tfrec"), ("test", "test_data", "test.tfrec"))
 
+# Building records needs no GPU, but TensorFlow in this process would take all of its
+# memory while openbot.train (a child process) trains, and cuBLAS then fails to start.
+# This process gets no GPU; the training child gets the environment as it was.
+TRAIN_ENV = dict(os.environ)
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+
 # The models each direction can train, with their options; the first is the default.
 MODELS = {
     "fwd": {
@@ -420,7 +426,7 @@ def main():
     cmd += train_extra  # later options win in argparse
     print(" ".join(cmd[1:]))
     # openbot.train copies manifest.txt into the model folder as data_manifest.txt.
-    sys.exit(subprocess.run(cmd, cwd=POLICY_DIR).returncode)
+    sys.exit(subprocess.run(cmd, cwd=POLICY_DIR, env=TRAIN_ENV).returncode)
 
 
 if __name__ == "__main__":

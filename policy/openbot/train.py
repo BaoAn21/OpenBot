@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import threading
+import time
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
@@ -97,6 +98,13 @@ class Hyperparameters:
     # Memory dropout and noise in training (data_augmentation.augment_mem), for any
     # memory model.
     MEM_AUG: bool = False
+    # Train steering only (losses.steer_only): the throttle output stays untrained, so
+    # the model is for the phone's Fixed or Manual throttle. Not for memory models
+    # (their memory holds throttle) or cil_mobile_fast_cat.
+    STEER_ONLY: bool = False
+    # The constant in the turn-weighted loss's weight (losses.turn_weighted); larger
+    # counts straights more. For the models trained on that loss.
+    TURN_FLOOR: float = losses.TURN_FLOOR
 
     # Records directory, absolute or relative to dataset/; empty means the default
     # for the configuration (tfrecords_path).
@@ -159,6 +167,12 @@ class Hyperparameters:
             model_name += "_turnloss"
         if self.MEM_AUG:
             model_name += "_memaug"
+        if self.TURN_FLOOR != losses.TURN_FLOOR:
+            model_name += f"_floor{self.TURN_FLOOR:g}"
+        if self.STEER_ONLY:
+            # The web app's publish keeps it in the phone's file name, and the phone
+            # won't drive such a model on its own throttle.
+            model_name += "_steeronly"
 
         return model_name
 
@@ -183,6 +197,8 @@ class Training:
         self.history = None
         self.model_name = ""
         self.dataset_name = "openbot"
+        # Appended to the folder name (a timestamp when the plain name is taken).
+        self.name_suffix = ""
         self.checkpoint_path = ""
         self.log_path = ""
         self.loss_fn = None
@@ -506,7 +522,7 @@ def visualize_train_data(tr: Training):
 
 
 def do_training(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0):
-    tr.model_name = tr.dataset_name + "_" + str(tr.hyperparameters)
+    tr.model_name = tr.dataset_name + "_" + str(tr.hyperparameters) + tr.name_suffix
     tr.checkpoint_path = os.path.join(models_dir, tr.model_name, "checkpoints")
     tr.log_path = os.path.join(models_dir, tr.model_name, "logs")
 
@@ -595,9 +611,12 @@ def do_training(tr: Training, callback: tf.keras.callbacks.Callback, verbose=0):
     elif tr.hyperparameters.MODEL in CAT_MODELS:
         tr.loss_fn = losses.ce_angle
     elif tr.hyperparameters.POLICY == "autopilot":
-        tr.loss_fn = losses.sq_weighted_mse_angle
+        tr.loss_fn = losses.turn_weighted(tr.hyperparameters.TURN_FLOOR)
     elif tr.hyperparameters.POLICY == "point_goal_nav":
         tr.loss_fn = losses.mae_raw_weighted_mse_angle
+    if tr.hyperparameters.STEER_ONLY:
+        # val_loss, which picks best-val and early stopping, becomes steering only too.
+        tr.loss_fn = losses.steer_only(tr.loss_fn)
 
     tr.metric_list = [
         # cil_mobile_fast_cat outputs more than its two labels; the others use Keras's.
@@ -805,9 +824,11 @@ def start_train(
     verbose=0,
     no_tf_record=False,
     run_name="openbot",
+    name_suffix="",
 ):
     tr = Training(params)
     tr.dataset_name = run_name
+    tr.name_suffix = name_suffix
     if no_tf_record:
         callback.broadcast("message", "Processing data...")
         tr.train_data_dir = os.path.join(dataset_dir, "train_data")
@@ -991,6 +1012,21 @@ if __name__ == "__main__":
         "in training, so the model relies more on the image",
     )
     parser.add_argument(
+        "--steer_only",
+        action="store_true",
+        help="train steering only: the throttle output stays untrained, drive the model "
+        "with the phone's Fixed or Manual throttle (not for memory models or "
+        "cil_mobile_fast_cat)",
+    )
+    parser.add_argument(
+        "--turn_floor",
+        type=float,
+        default=None,
+        help="models on the turn-weighted loss: the constant in its weight 2|steering| + "
+        f"floor (default {losses.TURN_FLOOR}); larger counts straights more, against "
+        "wiggling on them (0.5: full lock weighs 26x a straight frame, instead of 1,700x)",
+    )
+    parser.add_argument(
         "--records_dir",
         default=None,
         help="read the tfrecords from this directory (absolute or relative to "
@@ -1123,6 +1159,15 @@ if __name__ == "__main__":
         )
     if args.mem_aug and not is_mem_model:
         parser.error(f"--mem_aug needs a memory model, not {params.MODEL}")
+    if args.steer_only:
+        if is_mem_model:
+            # The memory feeds the throttle back in, an untrained one in eval_rollout.
+            parser.error(f"--steer_only isn't for memory models like {params.MODEL}")
+        if params.MODEL in CAT_MODELS:
+            parser.error(f"--steer_only isn't for {params.MODEL} (its loss is ce_angle)")
+        if args.policy != "autopilot":
+            parser.error("--steer_only is autopilot only")
+        params.STEER_ONLY = True
     if is_mem_model:
         if params.SEQ_LEN > 1 or args.trim_stationary:
             parser.error(f"--model {params.MODEL} takes no stacked-frame options")
@@ -1157,15 +1202,34 @@ if __name__ == "__main__":
         params.TURN_LOSS = args.turn_loss
         params.BATCH_NORM = True
 
+    if args.turn_floor is not None:
+        # The same choice do_training makes for the loss.
+        turn_loss = (
+            args.policy == "autopilot"
+            and params.MODEL not in CAT_MODELS
+            and (params.MODEL not in MSE_MODELS or params.TURN_LOSS)
+        )
+        if not turn_loss:
+            parser.error(
+                f"--turn_floor needs the turn-weighted loss, which {params.MODEL} "
+                + ("trains on only with --turn_loss" if params.MODEL in MSE_MODELS else "doesn't use")
+            )
+        if args.turn_floor <= 0:
+            parser.error("--turn_floor must be > 0")
+        params.TURN_FLOOR = args.turn_floor
+
     if args.records_dir:
         if args.create_tf_record or args.no_tf_record:
             parser.error("--records_dir reads existing records; build them separately")
         params.RECORDS_DIR = args.records_dir
 
-    # Training into an existing folder mixes two runs' checkpoints and logs.
+    # Training into an existing folder mixes two runs' checkpoints and logs, so another
+    # run of the same settings (more epochs, say) gets its own, timestamped folder.
     model_dir = os.path.join(models_dir, f"{args.run_name}_{params}")
+    name_suffix = ""
     if os.path.isdir(model_dir) and not args.resume:
-        parser.error(f"{model_dir} exists; rename it, or pass --resume to continue it")
+        name_suffix = time.strftime("_%Y%m%d-%H%M")
+        print(f"{model_dir} exists; this run goes to {model_dir}{name_suffix}")
 
     def broadcast(event, payload=None):
         print()
@@ -1183,4 +1247,5 @@ if __name__ == "__main__":
         verbose=1,
         no_tf_record=args.no_tf_record,
         run_name=args.run_name,
+        name_suffix=name_suffix,
     )

@@ -101,7 +101,12 @@ angle MSE collapsing to a batch mean on a 1-D tensor) are intentionally fixed.
 Don't fold throttle into the weight (the old `command_weight`): that was a
 workaround for straight reverse driving, which the user has dropped from the
 model's scope. Loss values from before this change aren't comparable to runs
-after it; compare models by the metrics.
+after it; compare models by the metrics. `--turn_floor F`
+(`losses.turn_weighted`, default 0.05 = `sq_weighted_mse_angle` itself) raises that 0.05:
+at 0.05 a straight frame weighs ~1/1,700 of full lock and fwd_s1-2 cil steered ~90/255
+where the label was 0, which showed as wiggling on straights. Opt-in for any model on the
+turn-weighted loss (refused for `cil_mobile_fast_cat` and for MSE models without
+`--turn_loss`); folder gets `_floor<F>`, web app field "Turn floor".
 
 **Memory model (`--model donkey_memory`).** donkeycar's memory pilot: one image plus
 the last `--mem_len` (default 3) predicted `(steering, throttle)` pairs. `--mem_cmd` adds
@@ -202,6 +207,18 @@ the first two columns, so on the phone it is a plain `CMDNAV` model, no Android 
 so `check_tflite` leaves frames whose top two bins are within `TIE_MARGIN` (0.02) out of
 `match` and reports them. The same ties can make it jump frame to frame on the car.
 
+**Steering only (`--steer_only`).** For `cil_mobile_fast`, `pilot_net`, `donkey_rnn` and
+`donkey_3d` (refused for memory models, whose memory holds throttle, and for
+`cil_mobile_fast_cat`). `losses.steer_only` wraps whichever loss the model would use: the
+throttle label is replaced by the stop-gradient prediction, so the throttle error and gradient
+are 0 and the steering term (and the turn weight) is untouched. val_loss, best-val and early
+stopping follow steering only; Keras's `mean_absolute_error` still averages in the untrained
+throttle, so compare by the angle metrics. Folder gets `_steeronly`, the web app's publish keeps
+it in the phone file name, and the Autopilot Session screen sends throttle 0 for a `steeronly`
+model on Model throttle (a toast says to pick Fixed or Manual). Same records, no export or
+Android model change. The ablation it is for: same model and sessions with and without it,
+compared on the car at Fixed throttle.
+
 **Dataset layout.** The current models are the Autopilot Session pair, and their data lives
 in `dataset/fwdbwd/`, not in `train_data/test_data`: recordings go into `fwdbwd/inbox/`,
 `python split_direction.py` turns them into a numbered session
@@ -213,8 +230,9 @@ and `python train_fwdbwd.py fwd|bwd [--sessions 1 3]` builds the records for tha
 `--run_name` (model folder prefix; `train_fwdbwd.py` uses `fwd_s1-2-3` style names) and
 `--early_stop N` (stop after N epochs without a better val loss; off by default, `train_fwdbwd.py`
 passes 20; `best.tflite` is the best-val checkpoint either way), copies
-the records' `manifest.txt` into the model folder as `data_manifest.txt`, and refuses an
-existing model folder unless `--resume`. `dataset/train_data/test_data` hold only a
+the records' `manifest.txt` into the model folder as `data_manifest.txt`, and when the
+model folder already exists (and no `--resume`) trains into `<name>_<YYYYMMDD-HHMM>` instead;
+`--resume` continues only the plain-named folder. `dataset/train_data/test_data` hold only a
 `README.txt` (it stops `openbot/__init__.py` creating `my_dataset_*` placeholders); the old
 `--create_tf_record` path still builds from them and deletes the manifest. The indicator sets
 (`indicator_training`, `indicator_data_session_2`) are another session on another track and

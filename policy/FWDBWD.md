@@ -126,6 +126,23 @@ python train_fwdbwd.py bwd --sessions 1 3 --num_epochs 60   # other options go t
   model has to look at the image more. No records rebuild; the folder gets `_memaug`.
   Train loss goes up and val may get a little worse; compare it with a run without it
   on the same sessions by the closed-loop numbers and on the robot.
+- `--steer_only` (`cil_mobile_fast`, `pilot_net`, `donkey_rnn`, `donkey_3d`; e.g.
+  `python train_fwdbwd.py fwd --model donkey_rnn --steer_only`) trains steering only: the
+  throttle term leaves the loss, the steering term is exactly as without it. Same records;
+  the folder gets `_steeronly`. Its throttle output is untrained, so drive it with the
+  Autopilot Session screen's Fixed or Manual throttle (on Model it stands still). Publish
+  keeps `_steeronly` in the phone's file name for that. Val loss and the logged
+  `mean_absolute_error` aren't comparable with a normal run (the first lacks throttle, the
+  second includes the untrained one); compare steering by the angle metrics and on the robot.
+- `--turn_floor F` (models on the turn-weighted loss: `cil_mobile_fast`, `pilot_net`,
+  `cil_mobile_fast_memory`, and the donkey/seq models with `--turn_loss`; e.g.
+  `python train_fwdbwd.py fwd --model cil_mobile_fast --turn_floor 0.5`) against wiggling on
+  straights. The loss weighs each frame by `(2|steering| + F)^2`; at the default 0.05 a
+  straight frame counts ~1,700x less than full lock, so the model hardly learns to hold 0
+  (fwd_s1-2 cil steered ~90/255 where you held 0). 0.5 makes it 26x, 1.0 9x. Same records;
+  the folder gets `_floor0.5`. Val loss isn't comparable across floors; check the steering
+  on straight frames *and* on hard turns (it may under-steer them, as the cat model did),
+  then on the robot in the same light.
 - The model lands in `models/<fwd|bwd>_s<sessions>_<settings>/`, for example
   `models/fwd_s1-2-3_donkey_memory_lr0.0003_bz128_mem3_color/`, with a
   `data_manifest.txt` listing every data folder it was trained on.
