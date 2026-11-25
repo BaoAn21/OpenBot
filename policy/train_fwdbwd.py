@@ -63,9 +63,15 @@ SPLITS = (("train", "train_data", "train.tfrec"), ("test", "test_data", "test.tf
 
 # Building records needs no GPU, but TensorFlow in this process would take all of its
 # memory while openbot.train (a child process) trains, and cuBLAS then fails to start.
-# This process gets no GPU; the training child gets the environment as it was.
+# main() hides the GPU from this process before TensorFlow loads; the training child
+# gets the environment as it was. Not at import: the web app imports this module, and
+# every job it started inherited the hidden GPU.
 TRAIN_ENV = dict(os.environ)
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+
+
+def hide_gpu():
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+
 
 # The models each direction can train, with their options; the first is the default.
 MODELS = {
@@ -309,6 +315,7 @@ def records_dir(dataset_dir, direction, mem_len, seq_tag=""):
 
 
 def main():
+    hide_gpu()
     parser = argparse.ArgumentParser(
         description=__doc__.splitlines()[0],
         epilog="Other options go on to openbot.train.",

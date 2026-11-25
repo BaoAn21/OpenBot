@@ -90,23 +90,25 @@ ran as root through a bind mount); a `PermissionError` while writing
 `matched_frame_ctrl.txt` or `train_preview.png` means another one surfaced, and
 the fix is `sudo chown -R sim:sim policy/dataset policy/models`.
 
-**Autopilot loss keeps the official OpenBot idea.** Labels here are
-`(steering, throttle)` / 255, not upstream's `(left, right)`, but
-`losses.sq_weighted_mse_angle` is a deliberate port of the upstream loss:
-`w^2 * (dt^2 + 5 * ds^2)` with `w = 2|steering| + 0.05` (upstream's
-`angle = right - left = -2 * steering`). The weight depends on turn sharpness
-only, so rare turns aren't drowned out by straight driving, and steering errors
-cost 5x throttle errors. Upstream's quirks (asymmetric `|angle + 0.05|`, and the
-angle MSE collapsing to a batch mean on a 1-D tensor) are intentionally fixed.
-Don't fold throttle into the weight (the old `command_weight`): that was a
-workaround for straight reverse driving, which the user has dropped from the
-model's scope. Loss values from before this change aren't comparable to runs
-after it; compare models by the metrics. `--turn_floor F`
-(`losses.turn_weighted`, default 0.05 = `sq_weighted_mse_angle` itself) raises that 0.05:
-at 0.05 a straight frame weighs ~1/1,700 of full lock and fwd_s1-2 cil steered ~90/255
-where the label was 0, which showed as wiggling on straights. Opt-in for any model on the
-turn-weighted loss (refused for `cil_mobile_fast_cat` and for MSE models without
-`--turn_loss`); folder gets `_floor<F>`, web app field "Turn floor".
+**Autopilot loss is the official OpenBot loss, unchanged.** Labels here are
+`(steering, throttle)` / 255, not upstream's `(left, right)`, so
+`losses.sq_weighted_mse_angle` turns both back into `(left, right)` (`losses.to_left_right`,
+left = t + s, right = t - s, the inverse of `Control.fromLeftRight`) and runs upstream's code
+on them line for line: weight `|angle + 0.05|` with `angle = right - left`, times the angle MSE
+plus the `(left, right)` MSE. The Ackermann label is the only difference from OpenBot; the user
+wants it that way, so don't "fix" anything in it. That includes upstream's own behaviour: the
+weight is slightly asymmetric, and `mean_squared_error` on the 1-D angle tensor is the **batch
+mean**, so every sample gets the batch's average angle error and only the `(left, right)` MSE
+is turn-weighted per sample. It matches upstream's code exactly (max difference 0, same
+gradients, checked 2026-11-21). From 2026-10-04 to 2026-11-21 (`e03f2c11`) a per-sample version
+was used instead (`w = 2|steering| + 0.05`, `w^2 * (dt^2 + 5 * ds^2)` per frame), which made
+straight frames count ~1/1,700 of full lock for steering; every model trained in that window
+was trained on it, and its loss values aren't comparable. `--turn_floor F`
+(`losses.turn_weighted`, default 0.05 = `sq_weighted_mse_angle` itself) is an experiment off
+the baseline: weight `|angle| + F` (outside the abs, as a large F inside it would zero the
+weight at angle = -F). Opt-in for any model on the turn-weighted loss (refused for
+`cil_mobile_fast_cat` and for MSE models without `--turn_loss`); folder gets `_floor<F>`, web
+app field "Turn floor".
 
 **Memory model (`--model donkey_memory`).** donkeycar's memory pilot: one image plus
 the last `--mem_len` (default 3) predicted `(steering, throttle)` pairs. `--mem_cmd` adds
@@ -198,7 +200,7 @@ columns 0-1 feed the usual metrics and previews (`metrics.mean_absolute_error` r
 for it, as the output is wider than the labels), and `losses.ce_angle` trains on the
 probabilities - the steering label made a Gaussian over the bins (`STEER_SIGMA_BINS` 1),
 cross-entropy, plus `CAT_THROTTLE_WEIGHT` (10) x squared throttle error. **No turn weight**,
-as donkeycar: the first run kept cil's w^2 (1,700x more for a hard turn than for straight)
+as donkeycar: the first run kept cil's per-sample w^2 of the time (1,700x more for a hard turn than for straight)
 and never predicted the straight bins. Same records and options as cil_mobile_fast (BN, colour aug, `--flip_aug`;
 `train_fwdbwd.py fwd|bwd --model cil_mobile_fast_cat`). `utils.generate_tflite` exports only
 the first two columns, so on the phone it is a plain `CMDNAV` model, no Android change.

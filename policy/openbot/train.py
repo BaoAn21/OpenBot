@@ -1022,9 +1022,9 @@ if __name__ == "__main__":
         "--turn_floor",
         type=float,
         default=None,
-        help="models on the turn-weighted loss: the constant in its weight 2|steering| + "
-        f"floor (default {losses.TURN_FLOOR}); larger counts straights more, against "
-        "wiggling on them (0.5: full lock weighs 26x a straight frame, instead of 1,700x)",
+        help="models on the turn-weighted loss, an experiment off the OpenBot baseline: "
+        f"the weight becomes |angle| + floor instead of OpenBot's |angle + {losses.TURN_FLOOR}|; "
+        "larger counts straights more",
     )
     parser.add_argument(
         "--records_dir",

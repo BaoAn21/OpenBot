@@ -137,10 +137,10 @@ python train_fwdbwd.py bwd --sessions 1 3 --num_epochs 60   # other options go t
 - `--turn_floor F` (models on the turn-weighted loss: `cil_mobile_fast`, `pilot_net`,
   `cil_mobile_fast_memory`, and the donkey/seq models with `--turn_loss`; e.g.
   `python train_fwdbwd.py fwd --model cil_mobile_fast --turn_floor 0.5`) against wiggling on
-  straights. The loss weighs each frame by `(2|steering| + F)^2`; at the default 0.05 a
-  straight frame counts ~1,700x less than full lock, so the model hardly learns to hold 0
-  (fwd_s1-2 cil steered ~90/255 where you held 0). 0.5 makes it 26x, 1.0 9x. Same records;
-  the folder gets `_floor0.5`. Val loss isn't comparable across floors; check the steering
+  straights. An experiment off the OpenBot baseline: the default loss is OpenBot's own
+  (weight `|angle + 0.05|`, angle = right - left = -2 x steering); with `--turn_floor F` the
+  weight becomes `|angle| + F`, so straight frames count more. Same records; the folder gets
+  `_floor0.5`. Train the plain baseline first. Val loss isn't comparable across floors; check the steering
   on straight frames *and* on hard turns (it may under-steer them, as the cat model did),
   then on the robot in the same light.
 - The model lands in `models/<fwd|bwd>_s<sessions>_<settings>/`, for example

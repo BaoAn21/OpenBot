@@ -40,6 +40,7 @@ from train_fwdbwd import (
     TRAIN_ENV,
     build_plain,
     folders,
+    hide_gpu,
     sessions_in,
 )
 
@@ -122,6 +123,7 @@ def shuffle_records(path, seed=0):
 
 
 def main():
+    hide_gpu()
     parser = argparse.ArgumentParser(
         description=__doc__.splitlines()[0],
         epilog="Other options go on to openbot.train.",

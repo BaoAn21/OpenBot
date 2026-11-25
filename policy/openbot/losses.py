@@ -54,41 +54,50 @@ def weighted_mse_angle(y_gt, y_pred):
     return angle_weight(y_gt) * mse_angle(y_gt, y_pred)
 
 
-# The constant in sq_weighted_mse_angle's weight: a straight frame weighs 0.05^2 against
-# 2.05^2 at full lock, ~1,700x less, so the model is barely trained to hold 0 on a
-# straight (fwd_s1-2 cil predicted ~90/255 there).
+# The constant in sq_weighted_mse_angle's weight, upstream's 0.05.
 TURN_FLOOR = 0.05
 
 
+def to_left_right(y):
+    # (steering, throttle) back to upstream's (left, right): Control.fromLeftRight
+    # inverted, left = throttle + steering, right = throttle - steering.
+    return tf.stack([throttle(y) + angle(y), throttle(y) - angle(y)], axis=1)
+
+
 def sq_weighted_mse_angle(y_true, y_pred):
-    # The official OpenBot loss, ported to (steering, throttle). Upstream works on
-    # (left, right) with angle = right - left; since left = t + s and right = t - s
-    # (Control.fromLeftRight), that angle is -2 * steering and its
-    # w^2 * (MSE + angle error^2) reduces to w^2 * (dt^2 + 5 * ds^2): steering
-    # errors cost 5x throttle errors, and samples are weighted by turn sharpness
-    # only, so the rare turns are not drowned out by straight driving.
-    # Two upstream quirks are dropped: its weight |angle + 0.05| is made symmetric
-    # (|angle| + 0.05), and the angle error is per sample instead of the batch mean
-    # that mean_squared_error returns for a 1-D tensor.
-    return _turn_weighted(y_true, y_pred, TURN_FLOOR)
-
-
-def _turn_weighted(y_true, y_pred, floor):
-    weight = 2.0 * tf.math.abs(angle(y_true)) + floor
-    steering_err = tf.math.square(angle(y_true) - angle(y_pred))
-    throttle_err = tf.math.square(throttle(y_true) - throttle(y_pred))
-    return tf.math.square(weight) * (throttle_err + 5.0 * steering_err)
+    # The official OpenBot loss, unchanged: the labels are turned back into (left,
+    # right) and upstream's code runs on them line for line, so the only difference
+    # from OpenBot is the Ackermann label. That includes upstream's own behaviour:
+    # the weight |angle + 0.05| is slightly asymmetric, and mean_squared_error on the
+    # 1-D angle tensor is the batch mean, so every sample gets the batch's average
+    # angle error and only the (left, right) MSE term is weighted per sample.
+    y_true, y_pred = to_left_right(y_true), to_left_right(y_pred)
+    angle_true = y_true[:, 1] - y_true[:, 0]
+    angle_pred = y_pred[:, 1] - y_pred[:, 0]
+    weight = tf.math.abs(angle_true + TURN_FLOOR)
+    return tf.math.square(weight) * (
+        tf.keras.losses.mean_squared_error(angle_true, angle_pred)
+        + tf.keras.losses.mean_squared_error(y_true, y_pred)
+    )
 
 
 def turn_weighted(floor=TURN_FLOOR):
-    # --turn_floor: sq_weighted_mse_angle with a larger constant, so straights count
-    # more (0.5: a full-lock frame weighs 26x a straight one; 1.0: 9x). The default is
-    # sq_weighted_mse_angle itself.
+    # --turn_floor: an experiment off the OpenBot baseline. sq_weighted_mse_angle with
+    # the weight |angle| + floor instead of |angle + 0.05| (inside the abs, a large
+    # floor would zero the weight at angle = -floor), so straights count more. The
+    # default is sq_weighted_mse_angle itself.
     if floor == TURN_FLOOR:
         return sq_weighted_mse_angle
 
     def loss(y_true, y_pred):
-        return _turn_weighted(y_true, y_pred, floor)
+        y_true, y_pred = to_left_right(y_true), to_left_right(y_pred)
+        angle_true = y_true[:, 1] - y_true[:, 0]
+        angle_pred = y_pred[:, 1] - y_pred[:, 0]
+        weight = tf.math.abs(angle_true) + floor
+        return tf.math.square(weight) * (
+            tf.keras.losses.mean_squared_error(angle_true, angle_pred)
+            + tf.keras.losses.mean_squared_error(y_true, y_pred)
+        )
 
     loss.__name__ = f"sq_weighted_mse_angle_floor{floor:g}"
     return loss

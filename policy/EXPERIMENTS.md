@@ -64,6 +64,17 @@ trained, so they are only comparable within the same test set:
 For a fair comparison, re-evaluate the `.tflite` files on one fixed test set; see "How to
 compare" below.
 
+## Loss versions
+
+- **Until 2026-10-04:** `command_weight` (steering or throttle in the weight), an early workaround.
+- **2026-10-04 to 2026-11-21 (`e03f2c11`):** a per-sample rewrite of OpenBot's loss,
+  `(2|s| + 0.05)^2 * (dt^2 + 5 ds^2)` per frame. Straight frames counted ~1/1,700 of full
+  lock for steering. Every turn-weighted model below from that window used it.
+- **From 2026-11-21:** OpenBot's `sq_weighted_mse_angle` exactly, run on `(left, right)`
+  converted from the Ackermann labels (same numbers and gradients as upstream's code). Its angle
+  term is the batch mean, so steering on straights is trained much more than in the previous
+  version. Loss values aren't comparable across versions; compare by metrics and on the robot.
+
 ## Models
 
 All under `policy/models/<folder>/checkpoints/`. `best.tflite` and `best-val.tflite` are

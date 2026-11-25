@@ -119,7 +119,7 @@ function form(opts, onQueued) {
       Object.entries(m.options).some(([k]) => !m.augmentations.includes(k)) ? h('h3', {}, 'Options') : null,
       optionChecks(Object.entries(m.options).filter(([k]) => !m.augmentations.includes(k))),
       turnFloorOn() ? h('div', { class: 'field' }, h('label', {}, 'Turn floor'), h('div', { class: 'row' }, num('turn_floor', 0.05),
-        h('span', { class: 'muted' }, `weight 2|steering| + floor; ${opts.turn_floor} = default, 0.5 or 1 count straights more (less wiggle)`))) : null,
+        h('span', { class: 'muted' }, `${opts.turn_floor} = OpenBot's loss as is; other values: weight |angle| + floor, straights count more (experiment)`))) : null,
       m.memory ? h('div', { class: 'field' }, h('label', {}, 'Memory length'), num('mem_len')) : null,
       m.seq ? h('div', { class: 'field' }, h('label', {}, 'Frame offsets'),
         h('input', { type: 'text', value: st.seq_offsets, onchange: (e) => { st.seq_offsets = e.target.value; schedulePreview(); } })) : null,
