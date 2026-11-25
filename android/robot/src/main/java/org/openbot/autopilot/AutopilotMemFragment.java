@@ -265,8 +265,9 @@ public class AutopilotMemFragment extends CameraFragment {
 
     protected void onInferenceConfigurationChanged() {
         computingNetwork = false;
-        if (croppedBitmap == null) {
-            // Defer creation until we're getting camera frames.
+        if (tracker == null) {
+            // Defer creation until we're getting camera frames. Not croppedBitmap: that stays null
+            // until a model loads, so a model picked after the first frame was never loaded.
             return;
         }
         final Network.Device device = getDevice();
@@ -542,6 +543,11 @@ public class AutopilotMemFragment extends CameraFragment {
 
             runInBackground(
                     () -> {
+                        // No network loaded (none picked yet, or it failed to load).
+                        if (autopilot == null || croppedBitmap == null) {
+                            computingNetwork = false;
+                            return;
+                        }
                         final Canvas canvas = new Canvas(croppedBitmap);
                         canvas.drawBitmap(bitmap, frameToCropTransform, null);
 

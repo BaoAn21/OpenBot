@@ -499,14 +499,16 @@ public abstract class ControlsFragment extends Fragment implements ServerListene
           @Override
           public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
             String selected = parent.getItemAtPosition(position).toString();
+            // Pushed models are listed with their extension, the rest without. Strip only a real
+            // ".tflite": stripping any extension cut "fwd_cil_0.05" to "fwd_cil_0", which matched
+            // nothing, so the pick was ignored and the previous model kept driving.
+            String name =
+                selected.endsWith(".tflite") ? FileUtils.nameWithoutExtension(selected) : selected;
             try {
               masterList.stream()
                   // Exact match: with contains(), "fwd_s1" also matched "fwd_s1-2-3" and whichever
-                  // came first in the list drove. Pushed models are listed with their extension.
-                  .filter(
-                      f ->
-                          FileUtils.nameWithoutExtension(f.name)
-                              .equals(FileUtils.nameWithoutExtension(selected)))
+                  // came first in the list drove.
+                  .filter(f -> FileUtils.nameWithoutExtension(f.name).equals(name))
                   .findFirst()
                   .ifPresent(value -> setModel(value));
 

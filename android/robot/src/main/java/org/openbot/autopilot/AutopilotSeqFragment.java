@@ -287,8 +287,9 @@ public class AutopilotSeqFragment extends CameraFragment {
         computingNetwork = false;
         final FrameHistory history = frameHistory;
         if (history != null) history.clear();
-        if (cropTarget == null) {
-            // Defer creation until we're getting camera frames.
+        if (tracker == null) {
+            // Defer creation until we're getting camera frames. Not cropTarget: that stays null
+            // until a model loads, so a model picked after the first frame was never loaded.
             return;
         }
         final Network.Device device = getDevice();
