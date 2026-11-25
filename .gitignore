@@ -26,3 +26,6 @@ kotlin-profile
 native
 jdks
 /android/FakeDependency.jar
+
+# Reference papers (PDFs), kept local
+/paper/
