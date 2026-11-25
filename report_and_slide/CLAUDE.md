@@ -1,0 +1,1 @@
+This is the report and slide part for my thesis, use formal way of writing report

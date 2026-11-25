@@ -4,10 +4,10 @@
   title: "Deep Learning Application on Smartphones for Autonomous Vehicles",
   thesis-type: "GRADUATION THESIS",
   kind: "THESIS",
-  major: "TODO",
-  supervisors: ("Dr. TODO",),
-  students: (("Tran Cao Bao An", "TODO"),),
-  place-date: "Ho Chi Minh City, TODO 2027",
+  major: "Computer Science",
+  supervisors: ("Dr. Le Trong Nhan",),
+  students: (("Tran Cao Bao An", "2370297"),),
+  place-date: "Ho Chi Minh City, December 2027",
   commitment: [
     I pledge that this thesis is based on my own work under the guidance of my
     supervisor. All studies, data, references, numbers, and statistics presented here
@@ -16,15 +16,12 @@
   ],
   acknowledgement: [
     First and foremost, I would like to express my deepest gratitude to my thesis
-    supervisor, *Dr. TODO*, for the invaluable guidance, encouragement, and support
+    supervisor, *Dr. Le Trong Nhan*, for the invaluable guidance, encouragement, and support
     throughout the course of this work.
 
     I sincerely thank the lecturers of the *Faculty of Computer Science and
     Engineering* at *Ho Chi Minh City University of Technology* for the knowledge and
     experience they have shared with me during my study.
-
-    I am also grateful to my family and friends for their constant encouragement and
-    support.
   ],
   abstract: [
     _Motivation._ TODO: why a learned autopilot on a low-cost car, and what was

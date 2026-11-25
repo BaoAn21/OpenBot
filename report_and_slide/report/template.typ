@@ -182,7 +182,7 @@
       #v(0.9cm)
       #text(size: 11pt, weight: "bold", kind)
       #v(1.2cm)
-      #text(size: 15pt, upper(title))
+      #text(size: 15pt, weight: "bold", upper(title))
       #v(1fr)
       Major: #major
       #v(1.2cm)
