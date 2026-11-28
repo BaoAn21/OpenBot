@@ -73,4 +73,4 @@ The main contributions of this thesis are:
 
 == Thesis outline
 @ch:background reviews related work. @ch:hardware and @ch:firmware describe the vehicle,
-@ch:app the phone app, @ch:training the learning pipeline, and @ch:results the evaluation.
+@ch:app the Android and web applications, @ch:dataset the dataset, @ch:training the driving models and their training, and @ch:results the evaluation.

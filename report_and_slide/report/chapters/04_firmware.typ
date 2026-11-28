@@ -1,28 +1,183 @@
 = Firmware <ch:firmware>
 
-The ESP32-S3 receives text commands from the phone over serial at 115200 baud
-(@tab:protocol). Driving commands use steering and throttle, not left/right wheel speeds.
+The firmware runs on the LilyGO T-Display-S3 (@sec:electronics) and connects the phone to
+the car's actuators. It has four tasks: it receives commands from the phone over the serial
+link, converts them into the pulse signals expected by the steering servo and the ESC,
+stops the car when the link to the phone is lost, and shows the car's state on the
+rear-facing display. It is written in C++ for the Arduino core of the ESP32 and is
+separate from OpenBot's own firmware, which supports OpenBot's robot bodies on an Arduino
+Nano or an ESP32 and interprets drive commands as left and right wheel speeds.
+
+== Board and pin assignment <sec:fw-pins>
+The LilyGO T-Display-S3 (@fig:lilygo) combines an ESP32-S3 microcontroller with 16 MB of
+flash memory and a 1.9-inch 170 × 320 pixel ST7789 display. Most of the microcontroller's
+pins are taken by the display and the board's buttons, so only a few general-purpose pins
+are available on the headers. The car needs only two of them, one for the steering servo
+and one for the ESC (@tab:pins); the phone is connected to the USB-C port, which carries
+the serial link and powers the board.
+
+#figure(
+  placement: auto,
+  grid(
+    columns: (32%, 62%),
+    gutter: 12pt,
+    align: horizon,
+    image("../figures/lilygo.jpg"),
+    image("../figures/LILYGO-T-DISPLAY-S3_4_pinmap.webp"),
+    [(a) Front and back], [(b) Pin map],
+  ),
+  caption: [The LilyGO T-Display-S3 development board (manufacturer's images).],
+) <fig:lilygo>
+
+#figure(
+  table(
+    columns: (auto, auto, auto),
+    align: left,
+    table.header([*Pin*], [*Connected to*], [*Signal*]),
+    [GPIO 1], [ESC], [Throttle (RC pulse)],
+    [GPIO 10], [Steering servo], [Steering (RC pulse)],
+    [GND], [ESC, servo], [Common ground],
+    [USB-C], [Phone], [Serial link (115200 baud), board power],
+    [GPIO 5–9, 15, 38–42, 45–48], [Built-in display], [Internal to the board],
+  ),
+  caption: [Pins used by the car.],
+) <tab:pins>
+
+== Serial protocol <sec:fw-protocol>
+The phone and the board exchange text messages over the USB-C connection at 115200 baud
+(@tab:protocol). Each message is one line terminated by a newline character: its first
+character identifies the message, and the rest of the line holds its comma-separated
+fields. The board collects incoming characters until the end of the line and then parses
+the message; messages with an unknown first character are ignored. This makes the
+protocol easy to test by hand from a serial terminal and lets the board ignore messages
+for features it does not have, such as the sensor settings the app can send.
 
 #figure(
   table(
     columns: (auto, 1fr),
     align: left,
     table.header([*Message*], [*Meaning*]),
-    [`h<ms>`], [Heartbeat; stop if no message within this time],
-    [`c<steering>,<throttle>`], [Drive command, each in $[-255, 255]$],
-    [`i<left>,<right>[,<reverse>]`], [Indicators / reverse light],
-    [`f`], [Request firmware info],
+    [`c<steering>,<throttle>`], [Drive command. Both values are integers in
+      $[-255, 255]$; positive steering turns right and positive throttle drives forward.
+      Values outside the range are clipped.],
+    [`h<ms>`], [Heartbeat. If the next heartbeat does not arrive within `<ms>`
+      milliseconds, the car stops.],
+    [`i<left>,<right>[,<reverse>]`], [Indicators, each 0 or 1. The third field, the
+      reverse light, is optional, so two-field messages remain valid.],
+    [`f`], [Feature request. The board replies `fTDISPLAY_S3:`, which the app shows as
+      the robot type.],
   ),
-  caption: [Serial protocol between phone and microcontroller.],
+  caption: [Serial protocol between the phone and the microcontroller.],
 ) <tab:protocol>
 
-A typical exchange (@lst:serial):
+The drive message keeps the form of OpenBot's, `c<a>,<b>`, but its two values are now the
+steering and the throttle rather than the left and right wheel speeds. The indicator
+message was extended with the optional reverse field. The four indicator states of the app
+(@sec:app-control) are sent as shown in @tab:indicator-msg, and a typical sequence of
+messages is shown in @lst:serial.
+
+#figure(
+  table(
+    columns: (auto, auto, auto),
+    align: (left, center, left),
+    table.header([*Indicator state*], [*App value*], [*Message*]),
+    [Left], [$-1$], [`i1,0`],
+    [Off], [$0$], [`i0,0`],
+    [Right], [$1$], [`i0,1`],
+    [Reverse], [$2$], [`i0,0,1`],
+  ),
+  caption: [Indicator states of the app and the corresponding serial messages.],
+) <tab:indicator-msg>
 
 #figure(
   ```text
-  h500        // heartbeat timeout 500 ms
+  h750        // heartbeat: stop unless the next one arrives within 750 ms
   i0,0        // indicators off
   c-40,120    // steer slightly left, drive forward
+  i0,0,1      // reverse light on
+  c0,-80      // wheels straight, reverse slowly
   ```,
-  caption: [Example serial messages.],
+  caption: [Example sequence of serial messages from the phone.],
 ) <lst:serial>
+
+== Actuator signals <sec:fw-actuators>
+
+Both the steering servo and the ESC are controlled by the standard RC signal: a pulse
+repeated at 50 Hz whose width, nominally between 1000 and 2000 µs, sets the steering
+position or the throttle. The pulses are generated by the ESP32-S3's PWM hardware, so their
+timing does not depend on the main loop.
+
+=== Steering
+The steering command, from $-255$ (full left) to $255$ (full right), is converted linearly
+into a pulse width between the values measured on the car (@sec:mods): 1320 µs with the
+wheels straight, 1550 µs at the left stop and 1080 µs at the right stop. The two sides
+are converted separately, because the centre does not lie exactly halfway between the
+stops. This way a command of zero always gives straight wheels, and full left and full
+right always reach the stops.
+
+=== Throttle
+The ESC stops the motor at 1500 µs, drives forward above it and reverses below it. Its full
+range of 1000 to 2000 µs is far too fast for an indoor track, as the WLtoys 144001 is a
+high-speed car. In addition, the motor does not turn at all close to 1500 µs: with the
+wheels off the ground, it first turns at about 1545 µs forward and 1444 µs in reverse. The
+throttle command is therefore converted into a narrow band on each side of neutral, which
+starts just where the motor begins to turn: 1540 to 1565 µs forward and 1455 to 1425 µs in
+reverse. Even the smallest throttle command thus moves the car, and full throttle stays at
+a speed that can be controlled on the track.
+
+The ESC is used in its forward/reverse mode, in which a pulse below neutral reverses the
+motor immediately (@sec:mods). In the alternative forward/brake/reverse mode, the first
+reverse command after driving forward only brakes, which neither the driving models nor
+the app expect. The ESC also learns the neutral pulse width when it is switched on, so the
+board must be powered before the ESC; since the board sends the neutral signal from the
+moment it starts, switching the ESC on afterwards is sufficient.
+
+@tab:fw-calibration summarises the calibration constants. They are compile-time constants
+at the top of the program and have to be measured again for a different car, servo or ESC.
+
+#figure(
+  table(
+    columns: (auto, auto, 1fr),
+    align: (left, right, left),
+    table.header([*Constant*], [*Value*], [*Meaning*]),
+    [`SERVO_CENTER_US`], [1320 µs], [Steering pulse with the wheels straight],
+    [`SERVO_LEFT_US`], [1550 µs], [Steering pulse at the left stop],
+    [`SERVO_RIGHT_US`], [1080 µs], [Steering pulse at the right stop],
+    [`ESC_NEUTRAL_US`], [1500 µs], [Throttle pulse that stops the motor],
+    [`ESC_FORWARD_DEADBAND_US`], [40 µs], [Gap from neutral to the smallest forward throttle],
+    [`ESC_FORWARD_MAX_US`], [1565 µs], [Throttle pulse at full forward command],
+    [`ESC_REVERSE_DEADBAND_US`], [45 µs], [Gap from neutral to the smallest reverse throttle],
+    [`ESC_REVERSE_MAX_US`], [1425 µs], [Throttle pulse at full reverse command],
+  ),
+  caption: [Calibration constants of the firmware for the car used in this work.],
+) <tab:fw-calibration>
+
+== Status display <sec:fw-display>
+The board's built-in 320 × 170 pixel display faces backwards from the rear of the car
+(@fig:car-rear) and replaces the turn-signal LEDs of OpenBot's robot body. Because the
+board is mounted upside down, the image is rotated by 180°. The display has four elements:
+
+- *Turn signals.* At each edge, three amber chevrons light up one after another, from the
+  centre outwards, like a sequential turn signal on a car: each chevron lights 140 ms
+  after the previous one, all three remain lit until 500 ms, and the cycle repeats every
+  800 ms. Both sides together act as hazard lights.
+- *Reverse light.* A badge at the top reading _REVERSE_ is lit white while the reverse
+  indicator is on.
+- *Steering and throttle.* In the centre, the current steering and throttle values are
+  shown as numbers and as bars centred at zero; the throttle bar is green when driving
+  forward and orange in reverse.
+- *Link status.* At the bottom, _PHONE_ while the phone is connected and _NO LINK_ when
+  the heartbeat has timed out.
+
+To keep the main loop short, so that serial messages are processed without delay, the
+firmware keeps the last drawn value of each element and redraws only the elements whose
+value has changed, at most every 20 ms. This is fast enough for the 140 ms steps of the
+turn-signal animation.
+
+TODO: close-up photo of the display showing a turn signal and the reverse badge.
+
+== Building and flashing <sec:fw-build>
+The firmware is built and flashed with `arduino-cli` and version 3.3 of the ESP32 Arduino
+core, using the "GFX Library for Arduino" for the display. The board must be configured with USB CDC
+enabled at boot, so that the serial port is provided on the USB-C connector to which the
+phone is attached; without it, the phone cannot communicate with the board.

@@ -11,8 +11,8 @@ microcontroller is described separately in @ch:firmware.
     columns: 2,
     gutter: 8pt,
     image("../figures/car_front.jpg"),
-    image("../figures/car_side.jpg"),
-    [(a) Front view], [(b) Rear three-quarter view],
+    image("../figures/car_rear.jpg"),
+    [(a) Front view], [(b) Top rear three-quarter view],
   ),
   caption: [The modified RC car with the smartphone, the microcontroller and its display
     mounted on the 3D-printed plate.],
@@ -120,7 +120,7 @@ faces backwards and acts as the car's turn signals and reverse light (@fig:car-r
 ) <fig:tdisplay>
 
 #figure(
-  image("../figures/car_back.jpg", width: 60%),
+  image("../figures/car_back.jpg", width: 45%),
   caption: [Rear view of the car. The microcontroller's display, mounted on the
     inclined stand, shows the turn signals; the phone is connected to it by a single
     USB-C cable.],

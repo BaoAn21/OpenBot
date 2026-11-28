@@ -62,8 +62,9 @@
 #include "chapters/03_hardware.typ"
 #include "chapters/04_firmware.typ"
 #include "chapters/05_android_app.typ"
-#include "chapters/06_training.typ"
-#include "chapters/07_results.typ"
-#include "chapters/08_conclusion.typ"
+#include "chapters/06_dataset.typ"
+#include "chapters/07_models.typ"
+#include "chapters/08_results.typ"
+#include "chapters/09_conclusion.typ"
 
 #bibliography("references.bib", title: "References", style: "ieee")
