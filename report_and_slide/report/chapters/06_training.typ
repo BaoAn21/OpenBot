@@ -1,7 +1,26 @@
 = Driving Policy Training <ch:training>
 
 == Dataset
-TODO: recording sessions, forward/backward split.
+All data were recorded on an indoor track marked with blue tape (@fig:track).
+
+recording sessions will include different light condition, such as in morning, in evening 
+under room light, afternoon with dim light, etc 
+
+
+TODO: track dimensions (lane width, total length), recording sessions, forward/backward
+split.
+
+#figure(
+  grid(
+    columns: 4,
+    gutter: 6pt,
+    image("../figures/track_01.jpg"),
+    image("../figures/track_03.jpg"),
+    image("../figures/track_04.jpg"),
+    image("../figures/track_06.jpg"),
+  ),
+  caption: [Sections of the indoor track used for data collection and evaluation.],
+) <fig:track>
 
 == Loss function
 Rare sharp turns would be drowned out by straight driving under a plain MSE, so each

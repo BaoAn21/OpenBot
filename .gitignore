@@ -29,3 +29,6 @@ jdks
 
 # Reference papers (PDFs), kept local
 /paper/
+
+# Robot app crash logs pulled from the phone
+crash_*.txt

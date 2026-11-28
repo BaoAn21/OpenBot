@@ -58,15 +58,30 @@ Diagram is drawn by Mermaid from text, no image editor needed.
 
 ---
 layout: image-right
-image: /rc-truck-banner.jpg
+image: /car.jpg
 ---
 
 # Hardware
 
-- RC car with Ackermann steering
+- WLtoys 144001 RC car, Ackermann steering
+- Brushed ESC + MG996R servo replace the stock receiver board
 - LilyGO T-Display-S3 drives servo and ESC
-- Screen doubles as turn signals and reverse light
-- Phone mounted on top, linked over USB
+- Phone and board on a 3D-printed plate, linked over USB
+
+---
+
+# Display as turn signals
+
+<div class="grid grid-cols-2 gap-8 items-center">
+<div>
+
+- The T-Display-S3 screen faces backwards
+- Shows the indicator the phone sends: left, right, reverse
+- Same signal is the model's command input
+
+</div>
+<video src="/status_display.mp4" autoplay loop muted controls class="h-96 rounded-lg shadow-xl mx-auto" />
+</div>
 
 ---
 layout: center

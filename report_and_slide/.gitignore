@@ -4,3 +4,9 @@ friend_slide/
 
 # Built output; rebuild with `typst compile report/main.typ`
 report/*.pdf
+friend report and slide/
+
+# Raw media kept locally; compressed copies used by the report are in report/figures/
+images/
+videos/
+report/figures.zip
